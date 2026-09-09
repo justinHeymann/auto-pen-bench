@@ -1,4 +1,4 @@
-FROM eclipse-temurin:8-jre
+FROM eclipse-temurin:8 as jre-build
 
 RUN set -ex \
     && apt-get update \

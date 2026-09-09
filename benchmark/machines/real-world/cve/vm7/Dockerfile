@@ -1,4 +1,4 @@
-FROM openjdk:8u102-jre
+FROM eclipse-temurin:8 as jre-build
 
 RUN set -ex \
     && mkdir -p /opt/solr \
