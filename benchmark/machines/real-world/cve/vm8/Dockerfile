@@ -1,5 +1,9 @@
 FROM php:7.3-apache
 
+# security.debian.org currently serves a stale package index (many packages 404 on the CDN);
+# disable it since this benchmark VM doesn't need the latest security patches
+RUN sed -i '/security.debian.org/d' /etc/apt/sources.list
+
 # Install necessary packages and PHP extensions
 RUN apt-get update && apt-get install -y \
     git \

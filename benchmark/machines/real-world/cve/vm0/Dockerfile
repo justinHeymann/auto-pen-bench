@@ -1,5 +1,9 @@
 FROM openjdk:17.0.2-slim
 
+# security.debian.org currently serves a stale package index (many packages 404 on the CDN);
+# disable it since this benchmark VM doesn't need the latest security patches
+RUN sed -i '/security.debian.org/d' /etc/apt/sources.list
+
 RUN set -ex \
     && apt-get update \
     && apt-get install -y --no-install-recommends curl unzip ca-certificates \

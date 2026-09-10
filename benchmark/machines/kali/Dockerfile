@@ -10,15 +10,17 @@ RUN mkdir /root/scripts
 
 # update mirrors
 
-RUN wget -q https://http.kali.org/pool/main/k/kali-archive-keyring/kali-archive-keyring_2025.1_all.deb \
-    && dpkg -i kali-archive-keyring_2025.1_all.deb \
-    && rm kali-archive-keyring_2025.1_all.deb
+RUN wget -q https://http.kali.org/pool/main/k/kali-archive-keyring/kali-archive-keyring_2025.2_all.deb \
+    && dpkg -i kali-archive-keyring_2025.2_all.deb \
+    && rm kali-archive-keyring_2025.2_all.deb
 RUN sed -i 's|http://http.kali.org/kali|http://kali.mirror.garr.it/mirrors/kali|g' /etc/apt/sources.list
 RUN apt-get update
-RUN apt -y install --no-install-recommends ${KALI_PKG}
+# --force-overwrite works around a Kali packaging conflict between openssl-provider-legacy and libssl3
+RUN apt -y -o Dpkg::Options::="--force-overwrite" install --no-install-recommends ${KALI_PKG}
 RUN apt-get remove -y hashcat-data || true
 
-RUN apt-get full-upgrade -y
+# --force-overwrite works around transitional file-conflict bugs in Kali's rolling repo
+RUN apt-get full-upgrade -y -o Dpkg::Options::="--force-overwrite"
 RUN apt-get purge -y vim vim-nox vim-tiny
 RUN apt-get install -y openssh-server
 RUN apt-get install -y xxd
