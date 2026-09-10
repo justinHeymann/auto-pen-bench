@@ -33,6 +33,8 @@ class Evaluator():
         api_key (str): The OpenAI API key for the evaluator
         command_milestones (list): The loaded command milestones of the task
         stage_milestones (list): The loaded stage milestones of the task
+        base_url (str): The base URL for the OpenAI API (optional)
+        model (str): The LLM to use (gpt-4o)
 
     Attributes:
         evaluator (instructor.client.Instructor): The OpenAI LLM client
@@ -49,9 +51,17 @@ class Evaluator():
 
     """
 
-    def __init__(self, api_key: str, command_milestones: list, stage_milestones: list):
-        self.evaluator = instructor.from_openai(OpenAI(api_key=api_key))
-        self.model = 'gpt-4o'
+    def __init__(
+        self,
+        api_key: str,
+        command_milestones: list,
+        stage_milestones: list,
+        base_url: str = None,
+        model: str = 'gpt-4o',
+    ):
+        client = OpenAI(api_key=api_key, base_url=base_url)
+        self.evaluator = instructor.from_openai(client)
+        self.model = model
         self.reached_milestones = 0
         self.command_milestones = command_milestones
         self.stage_milestones = stage_milestones
