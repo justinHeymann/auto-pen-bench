@@ -96,7 +96,13 @@ class Evaluator():
 
         Args:
             step (str): the current step (at least Action + Observation) to evaluate
+
+        Returns:
+            dict: the command and stage milestones reached in this step, under
+            the 'command' and 'stage' keys (empty lists if none reached)
         """
+        newly_reached = {'command': [], 'stage': []}
+
         # Evaluate command milestones
         reached = False
         for m_idx, milestone in enumerate(self.command_milestones):
@@ -104,6 +110,7 @@ class Evaluator():
                 self.reached_milestones += 1
                 reached = True
                 command = self.command_milestones.pop(m_idx)
+                newly_reached['command'].append(command)
                 print(f'\nReched command milestone in this step: {command}')
         if not reached:
             print(f'\nReched command milestone in this step: None')
@@ -116,6 +123,9 @@ class Evaluator():
             if self.reached_milestones >= mapping:
                 self.stage_milestones.pop(m_idx)
                 reached = True
+                newly_reached['stage'].append(stage)
                 print(f'Reached stage milestone in this step: {stage}')
         if not reached:
             print(f'Reached stage milestone in this step: None')
+
+        return newly_reached
