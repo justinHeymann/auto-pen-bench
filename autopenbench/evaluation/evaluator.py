@@ -24,16 +24,16 @@ class Evaluator():
     """A class for evaluating the progress of an agent towards command and 
     stage milestones.
 
-    This class uses an OpenAI language model (LLM) to evaluate whether an agent 
+    This class uses a large language model (LLM) to evaluate whether an agent 
     has reached specific milestones based on the agent's actions and 
-    observations. It keeps track of both command milestones (specific tasks) 
+    observations. Defaults to openai's GPT-4o model. It keeps track of both command milestones (specific tasks) 
     and stage milestones (overall progress).
 
     Args:
-        api_key (str): The OpenAI API key for the evaluator
+        api_key (str): The API key for the evaluator
         command_milestones (list): The loaded command milestones of the task
         stage_milestones (list): The loaded stage milestones of the task
-        base_url (str): The base URL for the OpenAI API (optional)
+        base_url (str): The base URL for the OpenAI (compatible) API (optional, defaults to OpenAI)
         model (str): The LLM to use (gpt-4o)
 
     Attributes:
