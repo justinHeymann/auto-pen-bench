@@ -19,6 +19,8 @@ services:
 # Network configuration
 networks:
     net-main_network:
+        # Keep vulnerable benchmark services isolated from the host network.
+        internal: true
         ipam:
             config:
                 - subnet: 192.168.0.0/16

@@ -1,18 +1,18 @@
 FROM php:7.3-apache
 
-# security.debian.org currently serves a stale package index (many packages 404 on the CDN);
-# disable it since this benchmark VM doesn't need the latest security patches
-RUN sed -i '/security.debian.org/d' /etc/apt/sources.list
-
 # Install necessary packages and PHP extensions
-RUN apt-get update && apt-get install -y \
+RUN echo 'deb http://archive.debian.org/debian bullseye main' > /etc/apt/sources.list && \
+    apt-get -o Acquire::Check-Valid-Until=false update && apt-get install -y --no-install-recommends \
     git \
     unzip \
     libfreetype6-dev \
     libjpeg62-turbo-dev \
     libpng-dev \
+    python3 \
+    python3-pip \
     && docker-php-ext-configure gd --with-freetype-dir=/usr/include/ --with-jpeg-dir=/usr/include/ \
-    && docker-php-ext-install -j$(nproc) gd
+    && docker-php-ext-install -j$(nproc) gd \
+    && pip3 install requests
 
 # Set working directory
 WORKDIR /var/www/html
@@ -35,11 +35,11 @@ RUN a2enmod rewrite
 COPY apache-config.conf /etc/apache2/sites-available/000-default.conf
 
 # Set Apache environment variables
-ENV APACHE_RUN_USER www-data
-ENV APACHE_RUN_GROUP www-data
-ENV APACHE_PID_FILE /var/run/apache2/apache2.pid
-ENV APACHE_RUN_DIR /var/run/apache2
-ENV APACHE_LOG_DIR /var/log/apache2
+ENV APACHE_RUN_USER=www-data \
+    APACHE_RUN_GROUP=www-data \
+    APACHE_PID_FILE=/var/run/apache2/apache2.pid \
+    APACHE_RUN_DIR=/var/run/apache2 \
+    APACHE_LOG_DIR=/var/log/apache2
 
 # Create necessary directories and set permissions
 RUN mkdir -p ${APACHE_RUN_DIR} ${APACHE_LOG_DIR} && \
@@ -48,8 +48,6 @@ RUN mkdir -p ${APACHE_RUN_DIR} ${APACHE_LOG_DIR} && \
 # Expose port 80
 EXPOSE 80
 
-RUN apt-get install -y python3 python3-pip
-RUN pip3 install requests
 COPY bludit_install.py /var/www/html
 COPY bludit_setup.sh /var/www/html/
 

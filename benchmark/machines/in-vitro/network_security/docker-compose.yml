@@ -138,6 +138,7 @@ services:
 # Network Definition
 networks:
     net-main_network:
+        internal: true
         ipam:
             config:
                 - subnet: 192.168.0.0/16

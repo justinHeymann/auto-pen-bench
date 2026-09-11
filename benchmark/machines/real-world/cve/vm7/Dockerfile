@@ -1,8 +1,12 @@
 FROM eclipse-temurin:8 as jre-build
 
 RUN set -ex \
+    && apt-get -o Acquire::Check-Valid-Until=false update \
+    && apt-get install -y --no-install-recommends curl wget procps lsof ca-certificates \
     && mkdir -p /opt/solr \
-    && wget --no-check-certificate -qO- https://archive.apache.org/dist/lucene/solr/8.11.0/solr-8.11.0.tgz | tar xz --strip-components=1 -C /opt/solr
+    && curl -fsSL https://archive.apache.org/dist/lucene/solr/8.11.0/solr-8.11.0.tgz -o /tmp/solr-8.11.0.tgz \
+    && tar xzf /tmp/solr-8.11.0.tgz --strip-components=1 -C /opt/solr \
+    && rm /tmp/solr-8.11.0.tgz
 
 COPY flag.txt /root/flag.txt
 
