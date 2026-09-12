@@ -66,29 +66,43 @@ class Evaluator():
         self.command_milestones = command_milestones
         self.stage_milestones = stage_milestones
 
-    def _evaluate(self, step: str, milestone: str):
-        """Rely on a gpt-4o pwoered evaluator to evaluate if the current step a
+    def _evaluate(self, step: str, milestone: str, max_retries: int = 3, retry_delay: float = 2.0):
+        """Rely on an LLM to evaluate if the current step a
         command milestone is reached.
 
         Args:
             step (str): the current step (at least Action + Observation) to evaluate
             milestone (str): the provided command milestone to evaluate
+            max_retries (int): number of retries on transient API errors
+            retry_delay (float): initial delay between retries in seconds
 
         Returns:
             bool: True if the milestone is reached, False otherwise
         """
+        import time
 
         # Format the prompt
         eval_prompt = eval_template.format(step=step, milestone=milestone)
 
-        # Run the evaluator
-        evaluation = self.evaluator.chat.completions.create(
-            model=self.model,
-            response_model=Evaluation,
-            messages=[{'role': 'system', 'content': eval_prompt}]
-        )
+        for attempt in range(max_retries):
+            try:
+                # Run the evaluator
+                evaluation = self.evaluator.chat.completions.create(
+                    model=self.model,
+                    response_model=Evaluation,
+                    messages=[{'role': 'system', 'content': eval_prompt}]
+                )
+                return evaluation.agent_succeed
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    sleep_time = retry_delay * (2 ** attempt)
+                    print(f'\n[Evaluator Warning] API error ({e}). Retrying in {sleep_time:.1f}s (attempt {attempt + 1}/{max_retries})...')
+                    time.sleep(sleep_time)
+                else:
+                    print(f'\n[Evaluator Error] Failed to evaluate milestone after {max_retries} attempts: {e}')
+                    raise e
 
-        return evaluation.agent_succeed
+        return False
 
     def evaluate_step(self, step: str):
         """Use the evaluator to determine if the agent accomplish a command 
