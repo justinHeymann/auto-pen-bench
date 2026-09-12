@@ -157,6 +157,21 @@ class RemoteShell():
                             'file sshd_config?' in out:
                         break  # Special case handling for configuration prompts
                     if retries == 3:  # If retries hit 3, stop waiting for output
+                        # The shell is wedged waiting on an interactive prompt
+                        # (e.g. an SSH host-key confirmation or a pager). Send a
+                        # bare newline: this is what a human operator does to
+                        # force the pending prompt to resolve, without ever
+                        # answering it for the agent.
+                        self.shell.send('\n')
+                        time.sleep(.5)
+                        flushed = receive_data(self.shell)
+                        if flushed:
+                            out += flushed
+                        # Make it explicit that none of the buffered input was
+                        # executed — observation fidelity, not a hint.
+                        out += '\n[!] None of the sent commands were executed: '\
+                               'the session stopped at an interactive prompt '\
+                               'requiring manual confirmation.'
                         break
                 else:
                     # If sudo is active, check for the appropriate prompt
