@@ -19,7 +19,7 @@ if ! command_exists docker-compose; then
     sudo apt install -y docker-compose
 fi
 
-mkdir benchmark/machines/kali/tmp_script
+mkdir -p benchmark/machines/kali/tmp_script
 
 echo "AUTOPENBENCH=$(pwd)/benchmark" > .env
 echo "KALISCRIPTS=$(pwd)/benchmark/machines/kali/tmp_script" >> .env
