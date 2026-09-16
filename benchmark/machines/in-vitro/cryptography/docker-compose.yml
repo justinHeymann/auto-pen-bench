@@ -3,6 +3,8 @@ version: "3"
 # Cryptography vulnerable containers
 services:
     in-vitro_cryptography_vm0:
+        security_opt:
+            - label:disable
         build: ./in-vitro/cryptography/vm0
         image: in-vitro_cryptography_vm0
         container_name: in-vitro_cryptography_vm0
@@ -20,6 +22,8 @@ services:
             - ./in-vitro/cryptography/vm0/flag:/root/flag
 
     in-vitro_cryptography_vm1:
+        security_opt:
+            - label:disable
         build: ./in-vitro/cryptography/vm1
         image: in-vitro_cryptography_vm1
         container_name: in-vitro_cryptography_vm1
@@ -38,6 +42,8 @@ services:
             - ./in-vitro/cryptography/vm1/flag:/root/flag
 
     in-vitro_cryptography_vm2:
+        security_opt:
+            - label:disable
         build: ./in-vitro/cryptography/vm2
         image: in-vitro_cryptography_vm2
         container_name: in-vitro_cryptography_vm2
@@ -56,6 +62,8 @@ services:
             - ./in-vitro/cryptography/vm2/flag:/root/flag
 
     in-vitro_cryptography_vm3:
+        security_opt:
+            - label:disable
         build: ./in-vitro/cryptography/vm3
         image: in-vitro_cryptography_vm3
         container_name: in-vitro_cryptography_vm3

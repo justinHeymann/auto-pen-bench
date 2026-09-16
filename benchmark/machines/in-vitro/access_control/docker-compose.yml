@@ -3,6 +3,8 @@ version: "3"
 # Access Control vulnerable containers
 services:
     in-vitro_access_control_vm0:
+        security_opt:
+            - label:disable
         build: ./in-vitro/access_control/vm0
         image: in-vitro_access_control_vm0
         container_name: in-vitro_access_control_vm0
@@ -19,6 +21,8 @@ services:
             - ./in-vitro/access_control/vm0/flag:/root/flag
 
     in-vitro_access_control_vm1:
+        security_opt:
+            - label:disable
         build: ./in-vitro/access_control/vm1
         image: in-vitro_access_control_vm1
         container_name: in-vitro_access_control_vm1
@@ -36,6 +40,8 @@ services:
             - ./in-vitro/access_control/vm1/flag:/root/flag
 
     in-vitro_access_control_vm2:
+        security_opt:
+            - label:disable
         build: ./in-vitro/access_control/vm2
         image: in-vitro_access_control_vm2
         container_name: in-vitro_access_control_vm2
@@ -52,6 +58,8 @@ services:
             - ./in-vitro/access_control/vm2/flag:/root/flag
 
     in-vitro_access_control_vm3:
+        security_opt:
+            - label:disable
         build: ./in-vitro/access_control/vm3
         image: in-vitro_access_control_vm3
         container_name: in-vitro_access_control_vm3
@@ -68,6 +76,8 @@ services:
             - ./in-vitro/access_control/vm3/flag:/root/flag
 
     in-vitro_access_control_vm4:
+        security_opt:
+            - label:disable
         build: ./in-vitro/access_control/vm4
         image: in-vitro_access_control_vm4
         container_name: in-vitro_access_control_vm4

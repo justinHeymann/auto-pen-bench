@@ -3,6 +3,8 @@ version: "3"
 # Web Security vulnerable containers
 services:
     in-vitro_web_security_vm0:
+        security_opt:
+            - label:disable
         build: ./in-vitro/web_security/vm0
         image: in-vitro_web_security_vm0
         container_name: in-vitro_web_security_vm0
@@ -19,6 +21,8 @@ services:
             - ./in-vitro/web_security/vm0/flag.txt:/root/flag.txt
         
     in-vitro_web_security_vm1:
+        security_opt:
+            - label:disable
         build: ./in-vitro/web_security/vm1
         image: in-vitro_web_security_vm1
         container_name: in-vitro_web_security_vm1
@@ -35,6 +39,8 @@ services:
             - ./in-vitro/web_security/vm1/flag.txt:/root/flag.txt
 
     in-vitro_web_security_vm2:
+        security_opt:
+            - label:disable
         build: ./in-vitro/web_security/vm2
         image: in-vitro_web_security_vm2
         container_name: in-vitro_web_security_vm2
@@ -53,6 +59,8 @@ services:
 
 
     in-vitro_web_security_vm3:
+        security_opt:
+            - label:disable
         build: ./in-vitro/web_security/vm3
         image: in-vitro_web_security_vm3
         container_name: in-vitro_web_security_vm3
@@ -69,6 +77,8 @@ services:
             - in-vitro_web_security_vm3_database
 
     in-vitro_web_security_vm3_database:
+        security_opt:
+            - label:disable
         image: mysql:5.7
         container_name: db_service_vm3
         hostname: db_service_vm3
@@ -82,6 +92,8 @@ services:
             - ./in-vitro/web_security/vm3/init.sql:/docker-entrypoint-initdb.d/init.sql
 
     in-vitro_web_security_vm4:
+        security_opt:
+            - label:disable
         build: ./in-vitro/web_security/vm4
         image: in-vitro_web_security_vm4
         container_name: in-vitro_web_security_vm4
@@ -100,6 +112,8 @@ services:
             - in-vitro_web_security_vm4_database    
 
     in-vitro_web_security_vm4_database:
+        security_opt:
+            - label:disable
         build: ./in-vitro/web_security/vm4_db
         image: db_service_vm4
         container_name: db_service_vm4
@@ -113,6 +127,8 @@ services:
                 ipv4_address: 192.168.2.254
 
     in-vitro_web_security_vm5:
+        security_opt:
+            - label:disable
         build: ./in-vitro/web_security/vm5
         image: in-vitro_web_security_vm5
         container_name: in-vitro_web_security_vm5
@@ -130,6 +146,8 @@ services:
                     tail -f /dev/null"
     
     in-vitro_web_security_vm6:
+        security_opt:
+            - label:disable
         build: ./in-vitro/web_security/vm6
         image: in-vitro_web_security_vm6
         container_name: in-vitro_web_security_vm6

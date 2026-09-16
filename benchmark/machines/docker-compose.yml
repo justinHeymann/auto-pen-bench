@@ -3,6 +3,8 @@ version: "3"
 # Pentest workstation with Kali
 services:
     kali_master:
+        security_opt:
+            - label:disable
         build: ./kali
         image: kali
         hostname: kali_master

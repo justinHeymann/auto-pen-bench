@@ -3,6 +3,8 @@ version: "3"
 # Real-world vulnerable containers
 services:
     real-world_cve_vm0:
+        security_opt:
+            - label:disable
         build: ./real-world/cve/vm0
         image: real-world_cve_vm0
         container_name: real-world_cve_vm0
@@ -14,6 +16,8 @@ services:
         restart: unless-stopped
     
     real-world_cve_vm1:
+        security_opt:
+            - label:disable
         build: ./real-world/cve/vm1
         image: real-world_cve_vm1
         container_name: real-world_cve_vm1
@@ -25,6 +29,8 @@ services:
         restart: unless-stopped
     
     real-world_cve_vm2:
+        security_opt:
+            - label:disable
         build: ./real-world/cve/vm2
         image: real-world_cve_vm2
         container_name: real-world_cve_vm2
@@ -40,6 +46,8 @@ services:
         restart: unless-stopped
     
     real-world_cve_vm3:
+        security_opt:
+            - label:disable
         build: ./real-world/cve/vm3
         image: real-world_cve_vm3
         container_name: real-world_cve_vm3
@@ -56,6 +64,8 @@ services:
             - ./real-world/cve/vm3/flag.txt:/root/flag.txt
     
     real-world_cve_vm4:
+        security_opt:
+            - label:disable
         build: ./real-world/cve/vm4
         image: real-world_cve_vm4
         container_name: real-world_cve_vm4
@@ -70,6 +80,8 @@ services:
         restart: unless-stopped
     
     real-world_cve_vm5:
+        security_opt:
+            - label:disable
         build: ./real-world/cve/vm5
         image: real-world_cve_vm5
         container_name: real-world_cve_vm5
@@ -83,6 +95,8 @@ services:
         restart: unless-stopped
     
     real-world_cve_vm6:
+        security_opt:
+            - label:disable
         build: ./real-world/cve/vm6
         image: real-world_cve_vm6
         container_name: real-world_cve_vm6
@@ -94,6 +108,8 @@ services:
         restart: unless-stopped
     
     real-world_cve_vm7:
+        security_opt:
+            - label:disable
         build: ./real-world/cve/vm7
         image: real-world_cve_vm7
         container_name: real-world_cve_vm7
@@ -105,6 +121,8 @@ services:
         restart: unless-stopped
 
     real-world_cve_vm8:
+        security_opt:
+            - label:disable
         build: ./real-world/cve/vm8
         image: real-world_cve_vm8
         container_name: real-world_cve_vm8
@@ -116,6 +134,8 @@ services:
         restart: unless-stopped
 
     real-world_cve_vm9:
+        security_opt:
+            - label:disable
         build: ./real-world/cve/vm9
         image: real-world_cve_vm9
         container_name: real-world_cve_vm9
@@ -127,6 +147,8 @@ services:
         restart: unless-stopped
     
     real-world_cve_vm10:
+        security_opt:
+            - label:disable
         build: ./real-world/cve/vm10
         image: real-world_cve_vm10
         container_name: real-world_cve_vm10
