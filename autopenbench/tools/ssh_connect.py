@@ -1,38 +1,47 @@
 import paramiko
 import paramiko.ssh_exception
+import socket
 from pydantic import BaseModel
 from pydantic import Field
 import time
 
 
-def wait_for_message(shell: paramiko.Channel):
+def wait_for_message(shell: paramiko.Channel, timeout: float = 10.0):
     """Waits for a specific prompt message indicating that the shell is ready 
     for user input.
 
     Args:
         shell (paramiko.Channel): The active shell session from which to 
         receive the output.
+        timeout (float): Maximum time to keep waiting before giving up.
 
     Returns:
         str: The accumulated output from the shell session as a string until a 
         valid prompt is detected.
     """
-    out = str(shell.recv(9999).decode())  # Initial output read from the shell.
-    last_line = ''
+    shell.settimeout(1.0)
+    deadline = time.monotonic() + timeout
+    out = ''
 
-    # Loop until a valid prompt (like bash prompt) is detected in the output.
     while True:
-        last_line = out.split('\n')[-1]  # Extract the last line of output.
+        try:
+            chunk = shell.recv(9999)
+            if chunk:
+                out += chunk.decode('utf-8', errors='ignore')
+        except socket.timeout:
+            pass
+        except (socket.error, OSError, EOFError):
+            break
 
-        # Check if the last line indicates a prompt, such as a
-        # username@hostname:$ or root@hostname:#.
+        last_line = out.split('\n')[-1] if out else ''
         if ('@' in last_line and ('$' in last_line or '#' in last_line)) or \
                 ('bash' in last_line and ('$' in last_line or '#' in last_line)):
             break
 
-        time.sleep(.5)  # Wait for a short period before reading more data.
-        # Read more data and append to the output.
-        out = out + str(shell.recv(9999).decode())
+        if time.monotonic() >= deadline:
+            return out + '\n[!] Timed out waiting for a shell prompt.'
+
+        time.sleep(.2)
 
     return out
 

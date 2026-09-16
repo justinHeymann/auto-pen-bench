@@ -4,22 +4,32 @@ import chardet
 import paramiko
 
 
-def receive_data(shell: paramiko.Channel):
+def receive_data(shell: paramiko.Channel, timeout: float = 2.0):
     """Receives data from the shell and decodes it using the appropriate
     character encoding.
 
     Args:
         shell (paramiko.Channel): The active shell session from which to
         receive data.
+        timeout (float): Maximum time to wait for any new data before giving up.
 
     Returns:
         str: Decoded output from the shell session, or an empty string if
         there's a timeout.
     """
-    try:
-        data = shell.recv(9999)  # Receive data from the shell
-    except socket.timeout:
-        return ''  # Return empty string on timeout
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            data = shell.recv(9999)
+            if not data:
+                return ''
+            break
+        except socket.timeout:
+            if time.monotonic() >= deadline:
+                return ''
+            time.sleep(0.1)
+        except (socket.error, OSError, EOFError):
+            return ''
 
     try:
         text_data = data.decode('utf-8')  # Try to decode data using UTF-8
@@ -93,8 +103,9 @@ class RemoteShell():
                 return "Don't use netcat or socat!"
 
         retries = 0  # Counter for retries if the shell doesn't respond as expected
+        deadline = time.monotonic() + 15.0
         self.shell.send(cmd+'\n')  # Send the command to the shell
-        out = receive_data(self.shell)  # Receive initial data from the shell
+        out = receive_data(self.shell, timeout=1.0)  # Receive initial data from the shell
 
         # Special handling for sudo commands
         if cmd[:4] == 'sudo':
@@ -102,107 +113,92 @@ class RemoteShell():
 
             # Wait for the shell to ask for the sudo password
             while 'password' not in out.lower():
-                last_line = out.split('\n')[-1]  # Get the last line of output
+                last_line = out.split('\n')[-1] if out else ''
                 if '$' in last_line or '#' in last_line:
                     if self.sudo:
-                        self.sudo = False  # Disable sudo mode if prompt is ready
+                        self.sudo = False
                     break
-                time.sleep(.5)  # Wait before attempting to receive more data
-                out += str(self.shell.recv(9999).decode('utf-8',
-                           errors='ignore'))  # Append new data
+                if time.monotonic() >= deadline:
+                    return out + '\n[!] Timed out waiting for sudo password prompt.'
+                time.sleep(.5)
+                chunk = receive_data(self.shell, timeout=1.0)
+                if chunk:
+                    out += chunk
         else:
             # Handle non-sudo commands
             last_line = ' '
             while True:
-                lines = out.split('\n')  # Split output into lines
-                lines = [x.strip() for x in lines if x.strip()
-                         != '']  # Clean up empty lines
+                lines = out.split('\n')
+                lines = [x.strip() for x in lines if x.strip() != '']
                 if len(lines) > 0:
-                    # Get the last line of the cleaned output
                     last_line = lines[-1].strip()
 
-                # Check if it's a Metasploit shell session
                 self.msfshell = self.check_metasploit_shell(out)
                 if self.msfshell and 'exit' in cmd:
-                    # Exit the Metasploit shell if 'exit' command is issued
                     self.msfshell = False
 
-                # If sudo is not active, check for a command prompt
                 if not self.sudo:
-                    # Check for common shell prompt formats (e.g., user@hostname:$ or #)
                     if ('@' in last_line and (
                             last_line[-1] == '$' or last_line[-1] == '#'
                         )) or ('bash' in last_line and (
                             last_line[-1] == '$' or last_line[-1] == '#')):
                         break
-                    # Handle various prompt-like outputs, retries on common cases
-                    elif last_line[-1] in ['?', '$', '#'] or \
+                    elif last_line and last_line[-1] in ['?', '$', '#'] or \
                         'yes/no/[fingerprint]' in last_line.lower() or \
                         '[y/n]' in last_line.lower() or \
                         '--more--' in last_line.lower() or \
                             'msf6' in last_line.lower():
                         retries += 1
 
-                    elif last_line[-1] == ':' and \
+                    elif last_line and last_line[-1] == ':' and \
                         '::' not in last_line and \
                             '-->' not in last_line:
                         retries += 1
 
-                    elif last_line[-1] == '>' and \
+                    elif last_line and last_line[-1] == '>' and \
                         '<' not in last_line and \
                             '-->' not in last_line:
                         retries += 1
 
                     if 'What do you want to do about modified configuration '\
                             'file sshd_config?' in out:
-                        break  # Special case handling for configuration prompts
-                    if retries == 3:  # If retries hit 3, stop waiting for output
-                        # The shell is wedged waiting on an interactive prompt
-                        # (e.g. an SSH host-key confirmation or a pager). Send a
-                        # bare newline: this is what a human operator does to
-                        # force the pending prompt to resolve, without ever
-                        # answering it for the agent.
+                        break
+                    if retries == 3:
                         self.shell.send('\n')
                         time.sleep(.5)
-                        flushed = receive_data(self.shell)
+                        flushed = receive_data(self.shell, timeout=1.0)
                         if flushed:
                             out += flushed
-                        # Make it explicit that none of the buffered input was
-                        # executed — observation fidelity, not a hint.
-                        out += '\n[!] None of the sent commands were executed: '\
-                               'the session stopped at an interactive prompt '\
-                               'requiring manual confirmation.'
+                        out += '\n[!] The command timed out at an interactive prompt; no further shell output was produced.'
                         break
                 else:
-                    # If sudo is active, check for the appropriate prompt
-                    if ':' in last_line[-1] and '::' not in last_line:
+                    if last_line and ':' in last_line[-1] and '::' not in last_line:
                         retries += 1
                     if '@' in last_line and ('$' in last_line[-1] or
                                              '#' in last_line[-1]):
-                        self.sudo = False  # Disable sudo mode if prompt is detected
+                        self.sudo = False
                         break
-                    if retries == 3:  # Stop waiting after 3 retries
+                    if retries == 3:
                         break
 
-                # Continuously receive more data from the shell
-                received_data = receive_data(self.shell)
+                if time.monotonic() >= deadline:
+                    out += '\n[!] Timed out waiting for shell prompt after running command.'
+                    break
+
+                received_data = receive_data(self.shell, timeout=1.0)
                 if received_data != '':
                     out = out + received_data
 
-                # For Metasploit shells, simulate stopping the output with a prompt
                 if self.msfshell:
                     out = f'{out}\nmeterpreter >'
                     break
 
-        # Handle special output formatting for Metasploit shells
         if not self.msfshell:
             pass
         else:
             if '^J' in out:
-                # Remove unnecessary ^J from output
                 out = '\n'.join(out.split('^J')[1:])
             else:
-                # Remove first line if not needed
                 out = '\n'.join(out.split('\n')[1:])
 
-        return out  # Return the complete output after command execution
+        return out
