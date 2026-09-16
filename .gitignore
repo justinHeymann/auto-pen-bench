@@ -11,8 +11,3 @@
 .bash_history
 *assistance.txt
 **/tmp_script/
-benchmark/machines/**/tmp_script/
-benchmark/**/tmp_script/
-**/.ipynb_checkpoints/
-**/.pytest_cache/
-**/*.local
