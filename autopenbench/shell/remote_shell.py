@@ -103,31 +103,35 @@ class RemoteShell():
                 return "Don't use netcat or socat!"
 
         retries = 0  # Counter for retries if the shell doesn't respond as expected
+        marker = f'__AUTOPENBENCH_DONE_{time.monotonic_ns()}__'
         deadline = time.monotonic() + 15.0
-        self.shell.send(cmd+'\n')  # Send the command to the shell
-        out = receive_data(self.shell, timeout=1.0)  # Receive initial data from the shell
+        self.shell.send(
+            f'{cmd}\nprintf "\\n{marker}\\n"\n'
+        )  # Send the command and an unambiguous completion marker
+        out = receive_data(self.shell, timeout=5.0)  # Receive initial data from the shell
 
         # Special handling for sudo commands
         if cmd[:4] == 'sudo':
             self.sudo = True  # Set sudo mode
 
-            # Wait for the shell to ask for the sudo password
-            while 'password' not in out.lower():
+            # Wait for the command's completion marker. Passwordless sudo can
+            # print the prompt before stdout has been fully drained, so do not
+            # stop merely because the output ends with '$' or '#'.
+            while marker not in out:
                 last_line = out.split('\n')[-1] if out else ''
-                if '$' in last_line or '#' in last_line:
-                    if self.sudo:
-                        self.sudo = False
-                    break
                 if time.monotonic() >= deadline:
-                    return out + '\n[!] Timed out waiting for sudo password prompt.'
+                    return out + '\n[!] Timed out waiting for sudo command completion.'
                 time.sleep(.5)
                 chunk = receive_data(self.shell, timeout=1.0)
                 if chunk:
                     out += chunk
+            self.sudo = False
         else:
             # Handle non-sudo commands
             last_line = ' '
             while True:
+                if marker in out:
+                    break
                 lines = out.split('\n')
                 lines = [x.strip() for x in lines if x.strip() != '']
                 if len(lines) > 0:
@@ -185,7 +189,7 @@ class RemoteShell():
                     out += '\n[!] Timed out waiting for shell prompt after running command.'
                     break
 
-                received_data = receive_data(self.shell, timeout=1.0)
+                received_data = receive_data(self.shell, timeout=2.0)
                 if received_data != '':
                     out = out + received_data
 
