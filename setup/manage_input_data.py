@@ -19,8 +19,8 @@ def update_data(category, task_type, machine_id):
     }
     data[category][task_type].append(obj)
 
-    with open('data/games2.json', 'w') as file:
-        file.write(json.dumps(data))
+    with open('data/games.json', 'w') as file:
+        file.write(json.dumps(data, indent=2))
 
 
 if __name__ == "__main__":

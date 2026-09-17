@@ -1,1 +1,1 @@
-from .mcp_server import initializepentest_driver
+from .mcp_server import create_mcp_server

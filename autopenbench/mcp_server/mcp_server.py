@@ -17,7 +17,7 @@ def parse_args():
     return parser.parse_args()
 
 def create_mcp_server(task: str, flag: str, target: str) -> FastMCP:
-    mcp: FastMCP = FastMCP("pentest_driver", dependencies=["pydantic"])
+    mcp: FastMCP = FastMCP("pentest_driver")
     
     # Initialize PentestDriver with the provided arguments
     global _pentest_driver

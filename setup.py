@@ -14,7 +14,8 @@ setup(
         'pyyaml>=6.0.2',
         'openai>=1.51.0',
         'instructor>=1.15.0',
-        'httpx>=0.27.2'
+        'httpx>=0.27.2',
+        'mcp>=1.1.0'
     ],
     include_package_data=True,
 )

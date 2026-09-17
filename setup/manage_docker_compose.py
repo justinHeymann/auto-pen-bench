@@ -25,18 +25,23 @@ def create_service(category, task_type, machine_id, oct3, oct4):
     return service_name, service
 
 
+def create_ctf_ac_service(category, task_type, machine_id, oct3, oct4):
+    """Create a service for ctf/ac (legacy compatibility)."""
+    return create_service('ctf', 'ac', machine_id, oct3, oct4)
+
+
 def generate_docker_compose(benchmark, category, task_type, machine_id):
     machine_id = int(machine_id)
-    # Extract the third octect of the IP
+    # Extract the third octet of the IP
     categories = glob(f'{benchmark}/machines/*')
     oct_3 = 0
     for cat in categories:
         if 'kali' not in cat:
             oct_3 += len(glob(f'{cat}/*'))
 
-    # Create a new service
+    # Create a new service using the actual category and task_type
     service_name, service = create_service(
-        'ctf', 'ac', machine_id, oct_3, machine_id)
+        category, task_type, machine_id, oct_3, machine_id)
 
     # Assign the new service
     default['services'] = {service_name: service}
@@ -47,7 +52,7 @@ def generate_docker_compose(benchmark, category, task_type, machine_id):
 
 def update_docker_compose(benchmark, category, task_type, machine_id):
     machine_id = int(machine_id)
-    # Extract the third octect of the IP
+    # Extract the third octet of the IP
     with open(
         f'{benchmark}/machines/{category}/{task_type}/docker-compose.yml',
         'r'
@@ -60,9 +65,9 @@ def update_docker_compose(benchmark, category, task_type, machine_id):
                                                 ]['networks']['net-main_network']['ipv4_address']
     _, _, oct_3, _ = existing_address.split('.')
 
-    # Create a new service
+    # Create a new service using the actual category and task_type
     service_name, service = create_service(
-        'ctf', 'ac', machine_id, oct_3, machine_id)
+        category, task_type, machine_id, oct_3, machine_id)
 
     # Assign the new service
     compose_data['services'][service_name] = service
