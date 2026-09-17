@@ -2,8 +2,7 @@ import argparse
 import mcp.types as types
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
-from autopenbench.tools import wait_for_message, SSHConnect, ExecuteBash, WriteFile
-from autopenbench.shell import RemoteShell
+from autopenbench.tools import SSHConnect, ExecuteBash, WriteFile, FinalAnswer
 from autopenbench.driver import PentestDriver
 
 _pentest_driver = None
@@ -37,23 +36,10 @@ def create_mcp_server(task: str, flag: str, target: str) -> FastMCP:
         """Execute a shell command on a machine."""
         if _pentest_driver is None:
             return [types.TextContent(type="text", text="Error: No pentest session initialized.")]
-        
-        if machine_ipaddr in _pentest_driver.remotes:
-            shell = _pentest_driver.remotes[machine_ipaddr]
-            out = ExecuteBash(machine_ipaddr=machine_ipaddr, cmd=cmd).run(shell)
-        else:
-            # Handle Kali reconnection logic
-            if machine_ipaddr == '192.168.0.5':
-                print('Restarting kali connection')
-                _pentest_driver.ssh_kali = _pentest_driver._connect_to_kali()
-                shell = _pentest_driver.ssh_kali.invoke_shell()
-                wait_for_message(shell)
-                _pentest_driver.remotes['192.168.0.5'] = RemoteShell(shell)
-                shell = _pentest_driver.remotes[machine_ipaddr]
-                out = ExecuteBash(machine_ipaddr=machine_ipaddr, cmd=cmd).run(shell)
-            else:
-                out = 'Before sending a remote command you need to set-up an SSH connection.'
-        
+
+        out, _ = _pentest_driver.step(
+            ExecuteBash(machine_ipaddr=machine_ipaddr, cmd=cmd)
+        )
         return [types.TextContent(type="text", text=out)]
 
     @mcp.tool(description="Establish SSH connection to a remote machine")
@@ -66,16 +52,16 @@ def create_mcp_server(task: str, flag: str, target: str) -> FastMCP:
         """Start an SSH session into the target machine"""
         if _pentest_driver is None:
             return [types.TextContent(type="text", text="Error: No pentest session initialized.")]
-        
+
         try:
-            ssh, out = SSHConnect(
-                ssh_ipaddr=ssh_ipaddr,
-                ssh_port=ssh_port,
-                ssh_username=ssh_username,
-                ssh_password=ssh_password
-            ).run(_pentest_driver.ssh_kali)
-            
-            _pentest_driver.remotes[ssh_ipaddr] = RemoteShell(ssh)
+            out, _ = _pentest_driver.step(
+                SSHConnect(
+                    ssh_ipaddr=ssh_ipaddr,
+                    ssh_port=ssh_port,
+                    ssh_username=ssh_username,
+                    ssh_password=ssh_password
+                )
+            )
             return [types.TextContent(type="text", text=out)]
         except Exception as e:
             return [types.TextContent(type="text", text=f"SSH connection failed: {str(e)}")]
@@ -84,9 +70,15 @@ def create_mcp_server(task: str, flag: str, target: str) -> FastMCP:
     async def final_answer(
         flag: str = Field(..., description="The captured flag")
     ) -> list[types.TextContent]:
-        """Provide the final flag of the CTF game."""
-        # Logic handled client side - this is just to let the agent know the tool exists
-        return [types.TextContent(type="text", text=f"Final answer submitted: {flag}")]
+        """Provide the final flag of the CTF game. The flag is validated
+        against the real one and the result reported to the agent."""
+        if _pentest_driver is None:
+            return [types.TextContent(type="text", text="Error: No pentest session initialized.")]
+
+        out, done = _pentest_driver.step(FinalAnswer(flag=flag))
+        if done:
+            out += "\nThe pentest is complete."
+        return [types.TextContent(type="text", text=out)]
 
     @mcp.tool(description="Write content to a file")
     async def write_file(
@@ -96,8 +88,10 @@ def create_mcp_server(task: str, flag: str, target: str) -> FastMCP:
         """Write a script or a text into a file. The file will be located in the /root/scripts folder of Kali machine."""
         if _pentest_driver is None:
             return [types.TextContent(type="text", text="Error: No pentest session initialized.")]
-        
-        out = WriteFile(content=content, file_name=file_name).run()
+
+        out, _ = _pentest_driver.step(
+            WriteFile(content=content, file_name=file_name)
+        )
         return [types.TextContent(type="text", text=out)]
 
     return mcp
