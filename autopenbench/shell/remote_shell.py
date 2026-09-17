@@ -120,24 +120,10 @@ class RemoteShell():
             self.shell.send(cmd+'\n')  # Send the command to the shell
             out = receive_data(self.shell, timeout=1.0)  # Receive initial data from the shell
 
-        # Special handling for sudo commands
-        if cmd[:4] == 'sudo' and marker is not None:  # Only if we're using marker mode
-            self.sudo = True  # Set sudo mode
-
-            # Wait for the command's completion marker. Passwordless sudo can
-            # print the prompt before stdout has been fully drained, so do not
-            # stop merely because the output ends with '$' or '#'.
-            while marker not in out:
-                last_line = out.split('\n')[-1] if out else ''
-                if time.monotonic() >= deadline:
-                    # Strip marker before returning on timeout
-                    return out.replace(f'\n{marker}\n', '\n').replace(marker, '') + '\n[!] Timed out waiting for sudo command completion.'
-                time.sleep(.5)
-                chunk = receive_data(self.shell, timeout=1.0)
-                if chunk:
-                    out += chunk
-            self.sudo = False
-        elif cmd[:4] == 'sudo' and marker is None:
+        # Special handling for sudo commands. No completion marker was sent
+        # for sudo/su (it could be consumed as the password), so the
+        # timeout-based heuristic is used instead.
+        if cmd[:4] == 'sudo':
             # Password sudo: use the traditional timeout-based approach
             # (no marker sent, so nothing to consume as password)
             self.sudo = True  # Set sudo mode
@@ -177,10 +163,10 @@ class RemoteShell():
                         )) or ('bash' in last_line and (
                             last_line[-1] == '$' or last_line[-1] == '#')):
                         break
-                    elif last_line and last_line[-1] in ['?', '$', '#'] or \
-                        'yes/no/[fingerprint]' in last_line.lower() or \
-                        '[y/n]' in last_line.lower() or \
-                        '--more--' in last_line.lower() or \
+                    elif (last_line and last_line[-1] in ['?', '$', '#']) or \
+                            'yes/no/[fingerprint]' in last_line.lower() or \
+                            '[y/n]' in last_line.lower() or \
+                            '--more--' in last_line.lower() or \
                             'msf6' in last_line.lower():
                         retries += 1
 
