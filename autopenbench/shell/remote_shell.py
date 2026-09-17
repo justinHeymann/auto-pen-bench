@@ -20,7 +20,7 @@ def receive_data(shell: paramiko.Channel, timeout: float = 2.0):
     deadline = time.monotonic() + timeout
     while True:
         try:
-            data = shell.recv(9999)
+            data = shell.recv(65536)
             if not data:
                 return ''
             break
@@ -66,7 +66,7 @@ class RemoteShell():
         try:
             # Set a timeout for receiving data from the shell
             self.shell.settimeout(5.0)
-        except:
+        except Exception:
             pass
 
     def check_metasploit_shell(self, out: str):
