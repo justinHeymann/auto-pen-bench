@@ -25,11 +25,6 @@ def create_service(category, task_type, machine_id, oct3, oct4):
     return service_name, service
 
 
-def create_ctf_ac_service(category, task_type, machine_id, oct3, oct4):
-    """Create a service for ctf/ac (legacy compatibility)."""
-    return create_service('ctf', 'ac', machine_id, oct3, oct4)
-
-
 def generate_docker_compose(benchmark, category, task_type, machine_id):
     machine_id = int(machine_id)
     # Extract the third octet of the IP
