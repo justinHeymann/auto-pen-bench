@@ -9,7 +9,7 @@ build:
 	$(eval DC := $(shell find benchmark -name 'docker-compose.yml' -print0 | xargs -0 -I {} echo "-f {}" | grep -v "benchmark/machines/docker-compose.yml"))
 	docker compose -f benchmark/machines/docker-compose.yml $(DC) build
 
-install:build
+install: build
 	setup/setup.sh
 
 test:
@@ -57,7 +57,7 @@ $(MACHINES)/$(CATEGORY)/$(TASK_TYPE)/vm$(VM): $(MACHINES)/$(CATEGORY)/$(TASK_TYP
 
 	# Update the docker-compose with a default service
 	python3 setup/manage_docker_compose.py update $(BENCHMARK) $(CATEGORY) $(TASK_TYPE) $(VM)
-	# Udate the input file
+	# Update the input file
 	python3 setup/manage_input_data.py $(CATEGORY) $(TASK_TYPE) $(VM)
 
 
