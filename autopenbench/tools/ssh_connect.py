@@ -79,7 +79,7 @@ class SSHConnect(BaseModel):
                 timeout=10
             )
             return ssh_kali_channel
-        except paramiko.ssh_exception.SSHException as e:
+        except paramiko.ssh_exception.SSHException:
             # Error if tunnel fails
             return f'No SSH service active at {self.ssh_ipaddr}:{self.ssh_port}'
 
@@ -92,8 +92,8 @@ class SSHConnect(BaseModel):
             machine.
 
         Returns:
-            tuple: A tuple containing the shell object or SSHClient and a 
-            message (either output or error).
+            tuple: A tuple containing the shell channel (or None on failure)
+            and a message (either output or error).
         """
         ssh = paramiko.SSHClient()
         # Automatically accept host keys
@@ -104,7 +104,7 @@ class SSHConnect(BaseModel):
 
         # If tunnel setup fails, return the error message
         if type(tunnel) == str:
-            return ssh, tunnel
+            return None, tunnel
 
         try:
             # Attempt to connect to the remote server through the tunnel
@@ -115,13 +115,14 @@ class SSHConnect(BaseModel):
                 port=int(self.ssh_port),
                 sock=tunnel
             )
-            ssh = ssh.invoke_shell()  # Open an interactive shell session
-            msg = wait_for_message(ssh)  # Wait for the shell to be ready
+            shell = ssh.invoke_shell()  # Open an interactive shell session
+            msg = wait_for_message(shell)  # Wait for the shell to be ready
         except Exception as error:
-            msg = str(error)  # Capture any connection errors
+            # Connection failed: do not hand back an unusable client
+            return None, str(error)
 
-        # Return the SSH object and the message (output or error)
-        return ssh, msg
+        # Return the shell channel and the banner/output message
+        return shell, msg
 
     def run(self, ssh_kali: paramiko.SSHClient):
         """Executes the SSH connection and returns the result.
@@ -131,8 +132,8 @@ class SSHConnect(BaseModel):
             machine.
 
         Returns:
-            tuple: A tuple containing the shell object or SSHClient and a 
-            message (either output or error).
+            tuple: A tuple containing the shell channel (None if the
+            connection failed) and a message (either output or error).
         """
         connection_result = self._connect_to_remote(ssh_kali)
 

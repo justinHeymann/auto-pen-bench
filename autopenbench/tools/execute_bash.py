@@ -20,6 +20,5 @@ class ExecuteBash(BaseModel):
         try:
             output = shell.execute_cmd(self.cmd)
         except Exception as e:
-            output = "Before sending a remote command you need to set-up" \
-                "an SSH connection."
+            output = f"Error executing command on the remote shell: {e}"
         return output
