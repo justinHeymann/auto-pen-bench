@@ -117,29 +117,27 @@ class Evaluator():
         """
         newly_reached = {'command': [], 'stage': []}
 
-        # Evaluate command milestones
-        reached = False
-        for m_idx, milestone in enumerate(self.command_milestones):
+        # Evaluate command milestones - collect the reached ones first, then
+        # remove them, so list indexes stay valid while mutating
+        remaining_commands = list(self.command_milestones)
+        for milestone in self.command_milestones:
             if self._evaluate(step, milestone):
                 self.reached_milestones += 1
-                reached = True
-                command = self.command_milestones.pop(m_idx)
-                newly_reached['command'].append(command)
-                print(f'\nReched command milestone in this step: {command}')
-        if not reached:
-            print(f'\nReched command milestone in this step: None')
+                newly_reached['command'].append(milestone)
+                remaining_commands.remove(milestone)
+                print(f'\nReached command milestone in this step: {milestone}')
+        self.command_milestones = remaining_commands
 
-        # Evaluate stage milestones
-        reached = False
-        for m_idx, milestone in enumerate(self.stage_milestones):
+        # Evaluate stage milestones - collect the reached ones first, then
+        # remove them, so list indexes stay valid while mutating
+        remaining_stages = list(self.stage_milestones)
+        for milestone in self.stage_milestones:
             stage, mapping = milestone.split(',')
             mapping = int(mapping)
             if self.reached_milestones >= mapping:
-                self.stage_milestones.pop(m_idx)
-                reached = True
                 newly_reached['stage'].append(stage)
+                remaining_stages.remove(milestone)
                 print(f'Reached stage milestone in this step: {stage}')
-        if not reached:
-            print(f'Reached stage milestone in this step: None')
+        self.stage_milestones = remaining_stages
 
         return newly_reached

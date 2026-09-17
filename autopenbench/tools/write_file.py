@@ -20,8 +20,24 @@ class WriteFile(BaseModel):
         Returns:
             str: observation for the agent
         """
-        with open(f'{SCRIPTS}/{self.file_name}', 'w') as file:
-            file.write(self.content)
-        output = f'File /root/scripts/{self.file_name} correctly saved.'
+        import os
+        # Sanitize the filename to prevent path traversal
+        # Only allow alphanumeric, underscore, hyphen, and dot
+        import re
+        safe_name = re.sub(r'[^a-zA-Z0-9._-]', '', os.path.basename(self.file_name))
+        if not safe_name:
+            safe_name = "unnamed_file.txt"
+
+        filepath = os.path.abspath(f'{SCRIPTS}/{safe_name}')
+        # Ensure the resolved path is still within SCRIPTS
+        if not os.path.abspath(SCRIPTS) in os.path.commonpath([filepath, SCRIPTS]):
+            return f"Error: Invalid filename '{self.file_name}'"
+
+        try:
+            with open(filepath, 'w') as file:
+                file.write(self.content)
+            output = f'File /root/scripts/{safe_name} correctly saved.'
+        except Exception as e:
+            output = f"Error writing file: {e}"
 
         return output

@@ -102,16 +102,26 @@ class RemoteShell():
             if x == 'nc' or x == 'socat':
                 return "Don't use netcat or socat!"
 
-        retries = 0  # Counter for retries if the shell doesn't respond as expected
-        marker = f'__AUTOPENBENCH_DONE_{time.monotonic_ns()}__'
-        deadline = time.monotonic() + 15.0
-        self.shell.send(
-            f'{cmd}\nprintf "\\n{marker}\\n"\n'
-        )  # Send the command and an unambiguous completion marker
-        out = receive_data(self.shell, timeout=5.0)  # Receive initial data from the shell
+        # For commands that may prompt for password (sudo, su), use the timeout-based heuristic
+        # without the marker, to avoid the marker being consumed as a password.
+        # For other commands, use the marker for unambiguous completion detection.
+        use_marker = not (cmd[:4] == 'sudo' or cmd[:2] == 'su ' or cmd == 'su')
+
+        if use_marker:
+            marker = f'__AUTOPENBENCH_DONE_{time.monotonic_ns()}__'
+            deadline = time.monotonic() + 15.0
+            self.shell.send(
+                f'{cmd}\nprintf "\\n{marker}\\n"\n'
+            )  # Send the command and an unambiguous completion marker
+            out = receive_data(self.shell, timeout=5.0)  # Receive initial data from the shell
+        else:
+            marker = None
+            deadline = time.monotonic() + 15.0
+            self.shell.send(cmd+'\n')  # Send the command to the shell
+            out = receive_data(self.shell, timeout=1.0)  # Receive initial data from the shell
 
         # Special handling for sudo commands
-        if cmd[:4] == 'sudo':
+        if cmd[:4] == 'sudo' and marker is not None:  # Only if we're using marker mode
             self.sudo = True  # Set sudo mode
 
             # Wait for the command's completion marker. Passwordless sudo can
@@ -120,17 +130,37 @@ class RemoteShell():
             while marker not in out:
                 last_line = out.split('\n')[-1] if out else ''
                 if time.monotonic() >= deadline:
-                    return out + '\n[!] Timed out waiting for sudo command completion.'
+                    # Strip marker before returning on timeout
+                    return out.replace(f'\n{marker}\n', '\n').replace(marker, '') + '\n[!] Timed out waiting for sudo command completion.'
                 time.sleep(.5)
                 chunk = receive_data(self.shell, timeout=1.0)
                 if chunk:
                     out += chunk
             self.sudo = False
+        elif cmd[:4] == 'sudo' and marker is None:
+            # Password sudo: use the traditional timeout-based approach
+            # (no marker sent, so nothing to consume as password)
+            self.sudo = True  # Set sudo mode
+            # Wait for the shell to ask for the sudo password
+            while 'password' not in out.lower():
+                last_line = out.split('\n')[-1] if out else ''
+                if '$' in last_line or '#' in last_line:
+                    if self.sudo:
+                        self.sudo = False  # Disable sudo mode if prompt is ready
+                    break
+                if time.monotonic() >= deadline:
+                    return out + '\n[!] Timed out waiting for sudo password prompt.'
+                time.sleep(.5)  # Wait before attempting to receive more data
+                out += receive_data(self.shell, timeout=1.0)  # Append new data
+            # After password flow, switch to non-sudo waiting logic
+            self.sudo = False
+            # Fall through to the non-sudo handling to wait for the final prompt
         else:
             # Handle non-sudo commands
             last_line = ' '
+            retries = 0
             while True:
-                if marker in out:
+                if marker is not None and marker in out:
                     break
                 lines = out.split('\n')
                 lines = [x.strip() for x in lines if x.strip() != '']
@@ -186,8 +216,8 @@ class RemoteShell():
                         break
 
                 if time.monotonic() >= deadline:
-                    out += '\n[!] Timed out waiting for shell prompt after running command.'
-                    break
+                    # Strip marker before returning on timeout
+                    return out.replace(f'\n{marker}\n', '\n').replace(marker, '') + '\n[!] Timed out waiting for shell prompt after running command.'
 
                 received_data = receive_data(self.shell, timeout=2.0)
                 if received_data != '':
@@ -204,5 +234,9 @@ class RemoteShell():
                 out = '\n'.join(out.split('^J')[1:])
             else:
                 out = '\n'.join(out.split('\n')[1:])
+
+        # Strip the completion marker and its surrounding newlines
+        if marker is not None and marker in out:
+            out = out.replace(f'\n{marker}\n', '\n').replace(marker, '')
 
         return out
