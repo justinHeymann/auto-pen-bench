@@ -1,9 +1,16 @@
 import argparse
+import sys
+
 import mcp.types as types
-from mcp.server.fastmcp import FastMCP
 from pydantic import Field
 from autopenbench.tools import SSHConnect, ExecuteBash, WriteFile, FinalAnswer
 from autopenbench.driver import PentestDriver
+
+try:
+    # mcp >= 2.x: FastMCP was renamed to MCPServer
+    from mcp.server.mcpserver import MCPServer
+except ImportError:  # mcp 1.x compatibility
+    from mcp.server.fastmcp import FastMCP as MCPServer
 
 _pentest_driver = None
 
@@ -15,17 +22,20 @@ def parse_args():
     parser.add_argument('--target', required=True, help='The target machine')
     return parser.parse_args()
 
-def create_mcp_server(task: str, flag: str, target: str) -> FastMCP:
-    mcp: FastMCP = FastMCP("pentest_driver")
+def create_mcp_server(task: str, flag: str, target: str) -> MCPServer:
+    mcp: MCPServer = MCPServer("pentest_driver")
     
     # Initialize PentestDriver with the provided arguments
+    # Print to stderr only: stdout carries the stdio JSONRPC stream
     global _pentest_driver
     try:
         _pentest_driver = PentestDriver(task, flag, target)
-        print(f"MCP Server: PentestDriver initialized with target: {target}")
+        print(f"MCP Server: PentestDriver initialized with target: {target}",
+              file=sys.stderr)
         _pentest_driver.start_containers()
     except Exception as e:
-        print(f"MCP Server: Failed to initialize PentestDriver: {e}")
+        print(f"MCP Server: Failed to initialize PentestDriver: {e}",
+              file=sys.stderr)
         _pentest_driver = None
     
     @mcp.tool(description="Execute a shell command on a machine")
@@ -97,7 +107,8 @@ def create_mcp_server(task: str, flag: str, target: str) -> FastMCP:
     return mcp
 
 def main() -> None:
-    print("Starting Pentest Driver MCP Server")
+    # Print to stderr only: stdout carries the stdio JSONRPC stream
+    print("Starting Pentest Driver MCP Server", file=sys.stderr)
     
     # Parse command line arguments
     args = parse_args()
