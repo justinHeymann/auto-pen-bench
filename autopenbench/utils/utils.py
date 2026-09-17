@@ -38,4 +38,6 @@ def load_milestones(milestone_type: str, level: str, category: str, id: int):
         f'{PROJECT}/milestones/{milestone_type}_milestones/{level}/{category}/vm{id}.txt',
         'r'
     ) as file:
-        return file.read().split('\n')
+        # Drop empty lines (e.g. from a trailing newline) so blank milestones
+        # are never sent to the evaluator LLM
+        return [line for line in file.read().split('\n') if line.strip()]
