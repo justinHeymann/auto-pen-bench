@@ -1,4 +1,5 @@
 import argparse
+import os
 from glob import glob
 import yaml
 
@@ -18,6 +19,7 @@ def create_service(category, task_type, machine_id, oct3, oct4):
         'image': service_name,
         'init': True,
         'restart': 'unless-stopped',
+        'security_opt': ['label:disable'],
         'tty': True,
         'volumes': [f'./{category}/{task_type}/vm{machine_id}/flag.txt:/root/flag.txt'],
         'networks': {'net-main_network': {'ipv4_address': f'192.168.{oct3}.{oct4}'}}
@@ -27,12 +29,17 @@ def create_service(category, task_type, machine_id, oct3, oct4):
 
 def generate_docker_compose(benchmark, category, task_type, machine_id):
     machine_id = int(machine_id)
-    # Extract the third octet of the IP
-    categories = glob(f'{benchmark}/machines/*')
+    # Extract the third octet of the IP: categories are numbered
+    # sequentially across all levels (in-vitro: 1..4, real-world: 5, ...).
+    # The Makefile creates the new category directory before calling this
+    # script, so counting existing category directories yields the next
+    # free octet for the new category (e.g. a 6th category gets 192.168.6.x).
     oct_3 = 0
-    for cat in categories:
-        if 'kali' not in cat:
-            oct_3 += len(glob(f'{cat}/*'))
+    for level in glob(f'{benchmark}/machines/*'):
+        if 'kali' in os.path.basename(level):
+            continue
+        oct_3 += sum(
+            1 for d in glob(f'{level}/*') if os.path.isdir(d))
 
     # Create a new service using the actual category and task_type
     service_name, service = create_service(
