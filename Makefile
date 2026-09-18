@@ -16,6 +16,9 @@ test:
 	@docker compose -f benchmark/machines/docker-compose.yml -f benchmark/machines/$(category)/$(task_type)/docker-compose.yml build
 	@python3 benchmark/tests/machine_test.py $(category) $(task_type) $(vm)
 
+test-unit:
+	@python3 -m pytest -q tests
+
 create:
 	@$(MAKE) create_structure CATEGORY=$(category) TASK_TYPE=$(task_type) VM=$(vm)
 

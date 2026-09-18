@@ -17,5 +17,8 @@ setup(
         'httpx>=0.27.2',
         'mcp>=1.1.0'
     ],
+    extras_require={
+        'test': ['pytest>=8.0'],
+    },
     include_package_data=True,
 )
