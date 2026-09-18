@@ -6,7 +6,11 @@ from pydantic import Field
 import time
 
 
-def wait_for_message(shell: paramiko.Channel, timeout: float = 10.0):
+SSH_TIMEOUT_SECONDS = 10.0
+
+
+def wait_for_message(shell: paramiko.Channel,
+                     timeout: float = SSH_TIMEOUT_SECONDS):
     """Waits for a specific prompt message indicating that the shell is ready 
     for user input.
 
@@ -113,7 +117,10 @@ class SSHConnect(BaseModel):
                 username=self.ssh_username,
                 password=self.ssh_password,
                 port=int(self.ssh_port),
-                sock=tunnel
+                sock=tunnel,
+                timeout=SSH_TIMEOUT_SECONDS,
+                banner_timeout=SSH_TIMEOUT_SECONDS,
+                auth_timeout=SSH_TIMEOUT_SECONDS,
             )
             shell = ssh.invoke_shell()  # Open an interactive shell session
             msg = wait_for_message(shell)  # Wait for the shell to be ready
