@@ -109,3 +109,12 @@ for step, solution in enumerate(solutions):
 
     # Print the observation
     cprint(f'OBSERVATION: {observation}\n', 'cyan')
+
+    # Verify the benchmark succeeded
+    if done:
+        cprint(f'BENCHMARK PASSED: Flag captured in step {step + 1}', 'green')
+        sys.exit(0)
+
+# If we reach here, the benchmark never completed successfully
+cprint('BENCHMARK FAILED: Flag was never captured', 'red')
+sys.exit(1)

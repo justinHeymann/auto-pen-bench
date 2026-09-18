@@ -2,8 +2,14 @@ import itertools
 import json
 import re
 import socket
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
+
+try:
+    import yaml
+except ImportError:
+    yaml = None
 
 import pytest
 
@@ -582,7 +588,7 @@ def test_mcp_server_initializes_driver(monkeypatch):
 
     assert server is not None
     assert mcp_mod._pentest_driver is driver
-    driver.start_containers.assert_called_once()
+    driver.reset.assert_called_once()  # reset() starts containers and connects to Kali
 
 
 def test_mcp_server_survives_driver_init_failure(monkeypatch):
@@ -596,3 +602,65 @@ def test_mcp_server_survives_driver_init_failure(monkeypatch):
 
     assert server is not None
     assert mcp_mod._pentest_driver is None
+
+
+def test_flag_normalization_truncates_and_strips():
+    driver = PentestDriver("task", "Abcdef1234567890", "target")
+
+    # Long flag with trailing text is accepted after normalization
+    output, done = driver.step(FinalAnswer(flag="Abcdef1234567890-extra"))
+    assert output == "You Won!"
+    assert done is True
+
+    # Flag with whitespace is accepted
+    output, done = driver.step(FinalAnswer(flag=" Abcdef1234567890 "))
+    assert output == "You Won!"
+    assert done is True
+
+
+def _load_manage_docker_compose():
+    """Load setup/manage_docker_compose.py by file path.
+
+    Importing it as ``setup.manage_docker_compose`` would shadow onto the
+    top-level ``setup.py`` module, so load it explicitly.
+    """
+    import importlib.util
+    path = Path(__file__).resolve().parent.parent / "setup" / "manage_docker_compose.py"
+    spec = importlib.util.spec_from_file_location("manage_docker_compose", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_create_service_includes_security_opt():
+    """Generated services must disable AppArmor like the hand-written ones."""
+    mdc = _load_manage_docker_compose()
+
+    _, service = mdc.create_service("level", "cat", 0, 6, 0)
+
+    assert service["security_opt"] == ["label:disable"]
+
+
+def test_generate_compose_assigns_next_free_octet(tmp_path):
+    """A new category gets the next free IP third octet (no collisions)."""
+    if yaml is None:
+        pytest.skip("PyYAML not installed")
+
+    mdc = _load_manage_docker_compose()
+
+    # 4 existing in-vitro categories + 1 real-world category, and the
+    # new category dir already exists (the Makefile creates it first).
+    for cat in ("access_control", "cryptography", "network_security", "web_security"):
+        (tmp_path / "machines" / "in-vitro" / cat).mkdir(parents=True)
+    (tmp_path / "machines" / "in-vitro" / "software").mkdir(parents=True)
+    (tmp_path / "machines" / "real-world" / "cve").mkdir(parents=True)
+    (tmp_path / "machines" / "kali").mkdir(parents=True)
+
+    mdc.generate_docker_compose(str(tmp_path), "in-vitro", "software", 0)
+
+    compose_path = tmp_path / "machines" / "in-vitro" / "software" / "docker-compose.yml"
+    data = yaml.safe_load(compose_path.read_text())
+    ip = data["services"]["in-vitro_software_vm0"]["networks"]["net-main_network"]["ipv4_address"]
+
+    # 5 in-vitro categories (incl. the new one) + 1 real-world = 6
+    assert ip == "192.168.6.0"
