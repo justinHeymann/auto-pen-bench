@@ -60,16 +60,26 @@ def random_token(length: int) -> str:
 
 
 def randomize(dry_run: bool = False) -> int:
+    # Parse existing file (preserve hand-formatted spacing if present)
     raw_games_text = GAMES_PATH.read_text()
-    games = json.loads(raw_games_text)
+    try:
+        games = json.loads(raw_games_text)
+    except json.JSONDecodeError:
+        print(f'[skip] {GAMES_PATH}: could not parse as JSON, skipping')
+        return 0
+
     changed = 0
     skipped = 0
     new_games_text = raw_games_text
 
-    for level, categories in games.items():
-        for category, entries in categories.items():
-            for entry in entries:
-                target = entry['target']
+    for level, categories in list(games.items()):
+        for category, entries in list(categories.items()):
+            for entry in list(entries):
+                target = entry.get('target')
+                if not target:
+                    skipped += 1
+                    continue
+
                 match = TARGET_RE.match(target)
                 if not match:
                     print(f'[skip] {target}: unrecognized target format')
@@ -78,7 +88,7 @@ def randomize(dry_run: bool = False) -> int:
 
                 _, parsed_category, vmid = match.groups()
                 flag_path = find_flag_file(level, parsed_category, vmid)
-                old_flag = entry['flag']
+                old_flag = entry.get('flag', '')
 
                 if flag_path is None:
                     print(f'[skip] {target}: no flag file found on disk')
@@ -95,30 +105,37 @@ def randomize(dry_run: bool = False) -> int:
                     skipped += 1
                     continue
 
-                # games.json is hand-formatted (not indent-uniform JSON), so
-                # it's edited as text below instead of via json.dumps, which
-                # would reformat the whole file and bury the real change.
-                old_kv = f'"flag":"{old_flag}"'
+                # Find and replace in the raw JSON text to preserve the
+                # file's existing formatting. Match the flag value in a
+                # format-agnostic way (tolerates whitespace after ':') so
+                # the script works on both hand-formatted and json.dump-ed
+                # games.json files.
                 new_flag = random_token(len(old_flag))
-                new_kv = f'"flag":"{new_flag}"'
-                if new_games_text.count(old_kv) != 1:
-                    print(f'[skip] {target}: could not find {old_kv!r} exactly once in games.json, leaving untouched')
+                flag_re = re.compile(
+                    r'("flag"\s*:\s*")' + re.escape(old_flag) + r'(")'
+                )
+                new_games_text, n_replaced = flag_re.subn(
+                    lambda m: m.group(1) + new_flag + m.group(2),
+                    raw_games_text,
+                )
+                if n_replaced != 1:
+                    print(f'[skip] {target}: flag not found exactly once in games.json, leaving untouched')
                     skipped += 1
                     continue
+                raw_games_text = new_games_text
 
                 relpath = flag_path.relative_to(REPO_ROOT)
                 print(f'[ok]   {target}: {old_flag} -> {new_flag} ({relpath})')
                 if not dry_run:
                     flag_path.write_text(raw_flag_file.replace(old_flag, new_flag))
-                    new_games_text = new_games_text.replace(old_kv, new_kv, 1)
                 changed += 1
 
     if not dry_run and changed:
-        GAMES_PATH.write_text(new_games_text)
+        GAMES_PATH.write_text(raw_games_text)
 
     print(f'\n{changed} flag(s) randomized, {skipped} skipped.'
           + (' (dry run, nothing written)' if dry_run else ''))
-    return 0
+    return changed
 
 
 if __name__ == '__main__':
