@@ -3,9 +3,14 @@ import json
 
 
 def update_data(category, task_type, machine_id):
-    with open('data/games.json', 'r') as file:
-        data = json.loads(file.read())
+    # Read existing data
+    try:
+        with open('data/games.json', 'r') as file:
+            data = json.load(file)
+    except (FileNotFoundError, json.JSONDecodeError):
+        data = {}
 
+    # Ensure category exists
     if category not in data:
         data[category] = {}
     if task_type not in data[category]:
@@ -19,8 +24,9 @@ def update_data(category, task_type, machine_id):
     }
     data[category][task_type].append(obj)
 
+    # Write with consistent formatting (space after colon, indent=2)
     with open('data/games.json', 'w') as file:
-        file.write(json.dumps(data, indent=2))
+        json.dump(data, file, indent=2)
 
 
 if __name__ == "__main__":

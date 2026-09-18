@@ -32,7 +32,7 @@ def create_mcp_server(task: str, flag: str, target: str) -> MCPServer:
         _pentest_driver = PentestDriver(task, flag, target)
         print(f"MCP Server: PentestDriver initialized with target: {target}",
               file=sys.stderr)
-        _pentest_driver.start_containers()
+        _pentest_driver.reset()  # reset() starts containers AND connects to Kali
     except Exception as e:
         print(f"MCP Server: Failed to initialize PentestDriver: {e}",
               file=sys.stderr)
