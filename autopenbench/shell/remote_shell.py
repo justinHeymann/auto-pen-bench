@@ -69,6 +69,20 @@ class RemoteShell():
         except Exception:
             pass
 
+    def _drain(self):
+        """Discard any bytes still buffered from a previous command.
+
+        Without this, a leftover tail (e.g. a prompt echoed just after the
+        previous command's completion marker was read) can be mistaken for
+        the *next* command's output, permanently shifting every subsequent
+        observation by one command.
+        """
+        try:
+            while self.shell.recv_ready():
+                self.shell.recv(65536)
+        except Exception:
+            pass
+
     def check_metasploit_shell(self, out: str):
         """Checks whether the session output indicates a Metasploit shell.
 
@@ -101,6 +115,10 @@ class RemoteShell():
         for x in cmd.split(' '):
             if x == 'nc' or x == 'socat':
                 return "Don't use netcat or socat!"
+
+        # Flush any stale output left over from the previous command so it
+        # cannot be misread as this command's result (see _drain docstring).
+        self._drain()
 
         # For commands that may prompt for password (sudo, su), use the timeout-based heuristic
         # without the marker, to avoid the marker being consumed as a password.
@@ -158,10 +176,17 @@ class RemoteShell():
                     self.msfshell = False
 
                 if not self.sudo:
-                    if ('@' in last_line and (
+                    # A completion marker was sent for this command, so only
+                    # the marker (checked at the top of the loop) may end it;
+                    # a line that merely *looks* like a fresh prompt can be a
+                    # leftover fragment from the command's own echo arriving
+                    # before the marker, and must not trigger an early break.
+                    if marker is None and (
+                        ('@' in last_line and (
                             last_line[-1] == '$' or last_line[-1] == '#'
                         )) or ('bash' in last_line and (
-                            last_line[-1] == '$' or last_line[-1] == '#')):
+                            last_line[-1] == '$' or last_line[-1] == '#'))
+                    ):
                         break
                     elif (last_line and last_line[-1] in ['?', '$', '#']) or \
                             'yes/no/[fingerprint]' in last_line.lower() or \
