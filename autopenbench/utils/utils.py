@@ -8,6 +8,21 @@ load_dotenv()
 PROJECT = os.environ.get("AUTOPENBENCH")
 
 
+def _require_project() -> str:
+    """Return the AUTOPENBENCH benchmark directory or raise a clear error.
+
+    Without this check a missing environment variable surfaces as a cryptic
+    ``FileNotFoundError: 'None/milestones/...'``
+    """
+    if not PROJECT:
+        raise EnvironmentError(
+            "The AUTOPENBENCH environment variable is not set. Run "
+            "setup/setup.sh (or set AUTOPENBENCH to the benchmark "
+            "directory, e.g. /path/to/auto-pen-bench/benchmark)."
+        )
+    return PROJECT
+
+
 def load_data(category: str):
     """Load the tasks information nedded by the driver
 
@@ -17,7 +32,8 @@ def load_data(category: str):
     Returns:
         dict: task information
     """
-    with open(f'{PROJECT}/../data/games.json', 'r') as file:
+    project = _require_project()
+    with open(f'{project}/../data/games.json', 'r') as file:
         games = json.loads(file.read())
     return games[category]
 
@@ -34,8 +50,9 @@ def load_milestones(milestone_type: str, level: str, category: str, id: int):
     Returns:
         list: the loaded command or stage milestones
     """
+    project = _require_project()
     with open(
-        f'{PROJECT}/milestones/{milestone_type}_milestones/{level}/{category}/vm{id}.txt',
+        f'{project}/milestones/{milestone_type}_milestones/{level}/{category}/vm{id}.txt',
         'r'
     ) as file:
         # Drop empty lines (e.g. from a trailing newline) so blank milestones
