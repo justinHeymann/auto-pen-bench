@@ -5,7 +5,7 @@ import json
 def update_data(category, task_type, machine_id):
     # Read existing data
     try:
-        with open('data/games.json', 'r') as file:
+        with open('data/games.json') as file:
             data = json.load(file)
     except (FileNotFoundError, json.JSONDecodeError):
         data = {}

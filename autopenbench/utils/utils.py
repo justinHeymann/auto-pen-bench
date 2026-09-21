@@ -2,6 +2,7 @@ import json
 import os
 
 from dotenv import load_dotenv
+
 load_dotenv()
 
 # Set environment variables for project and scripts directories
@@ -15,7 +16,7 @@ def _require_project() -> str:
     ``FileNotFoundError: 'None/milestones/...'``
     """
     if not PROJECT:
-        raise EnvironmentError(
+        raise OSError(
             "The AUTOPENBENCH environment variable is not set. Run "
             "setup/setup.sh (or set AUTOPENBENCH to the benchmark "
             "directory, e.g. /path/to/auto-pen-bench/benchmark)."
@@ -33,7 +34,7 @@ def load_data(category: str):
         dict: task information
     """
     project = _require_project()
-    with open(f'{project}/../data/games.json', 'r') as file:
+    with open(f'{project}/../data/games.json') as file:
         games = json.loads(file.read())
     return games[category]
 
@@ -52,8 +53,7 @@ def load_milestones(milestone_type: str, level: str, category: str, id: int):
     """
     project = _require_project()
     with open(
-        f'{project}/milestones/{milestone_type}_milestones/{level}/{category}/vm{id}.txt',
-        'r'
+        f'{project}/milestones/{milestone_type}_milestones/{level}/{category}/vm{id}.txt'
     ) as file:
         # Drop empty lines (e.g. from a trailing newline) so blank milestones
         # are never sent to the evaluator LLM

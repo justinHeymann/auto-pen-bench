@@ -1,5 +1,5 @@
-from pydantic import BaseModel
-from pydantic import Field
+from pydantic import BaseModel, Field
+
 from autopenbench.shell import RemoteShell
 
 
