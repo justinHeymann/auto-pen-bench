@@ -83,6 +83,61 @@ class RemoteShell():
         except Exception:
             pass
 
+    def is_alive(self) -> bool:
+        """True while the channel can still carry commands.
+
+        A killed sshd (or a torn-down container) closes the channel, after
+        which every command fails with 'Socket is closed'. Callers use this
+        to re-establish the session instead of looping on dead sockets.
+        """
+        shell = self.shell
+        if shell is None or getattr(shell, 'closed', None) is True:
+            return False
+        transport_attr = getattr(shell, 'get_transport', None)
+        if callable(transport_attr):
+            try:
+                transport = transport_attr()
+            except Exception:
+                return False
+            if transport is not None and not transport.is_active():
+                return False
+        return True
+
+    def _interrupt_foreground_process(self) -> str:
+        """Escape a foreground command that is stuck waiting for input.
+
+        Used for commands that carry a completion marker: such a program has
+        no way to be answered (the marker was already typed into it), so it
+        keeps reading the channel, swallows the *next* command and its
+        marker, and shifts every later observation. Sending Ctrl+C makes the
+        shell return to a usable prompt instead of leaving the session
+        permanently desynced.
+
+        Returns:
+            str: Whatever the interrupt produced, plus a note for the agent.
+        """
+        interrupted = ''
+        for _ in range(2):  # some programs need a second Ctrl+C
+            try:
+                self.shell.send('\x03')
+            except Exception as error:
+                return (
+                    f'\n[!] The shell channel is no longer usable '
+                    f'({type(error).__name__}: {error}); the session must be '
+                    're-established before any further command.'
+                )
+            time.sleep(.5)
+            received = receive_data(self.shell, timeout=1.0)
+            if received:
+                interrupted += received
+        # Drop anything the aborted command left behind, so it cannot be
+        # misread as the next command's output.
+        self._drain()
+        return interrupted + (
+            '\n[!] The command timed out at an interactive prompt; it was '
+            'interrupted (Ctrl+C) so the shell stays usable.'
+        )
+
     def check_metasploit_shell(self, out: str):
         """Checks whether the session output indicates a Metasploit shell.
 
@@ -209,12 +264,22 @@ class RemoteShell():
                             'file sshd_config?' in out:
                         break
                     if retries == 3:
-                        self.shell.send('\n')
-                        time.sleep(.5)
-                        flushed = receive_data(self.shell, timeout=1.0)
-                        if flushed:
-                            out += flushed
-                        out += '\n[!] The command timed out at an interactive prompt; no further shell output was produced.'
+                        # A marker-carrying command cannot be answered
+                        # interactively: the harness already typed the
+                        # completion marker, which an interactive program
+                        # reads as input, so the command can never finish and
+                        # would swallow the next one as well. Escape its
+                        # prompt. Commands that are meant to prompt (sudo/su,
+                        # sent without a marker) keep their prompt alive --
+                        # the agent is expected to send the password next.
+                        if marker is not None:
+                            out += self._interrupt_foreground_process()
+                        else:
+                            out += (
+                                '\n[!] The command timed out at an '
+                                'interactive prompt; the prompt is still '
+                                'waiting for input.'
+                            )
                         break
                 else:
                     if last_line and ':' in last_line[-1] and '::' not in last_line:
