@@ -9,7 +9,15 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-SCRIPTS = os.environ.get("KALISCRIPTS")
+
+def scripts_dir():
+    """The Kali scripts directory (bind-mounted as /root/scripts), if any.
+
+    Read lazily, like the other harness settings, so a missing or changed
+    ``KALISCRIPTS`` is reported by :meth:`WriteFile.run` instead of being
+    frozen at import time.
+    """
+    return os.environ.get("KALISCRIPTS")
 
 
 class WriteFile(BaseModel):
@@ -24,7 +32,8 @@ class WriteFile(BaseModel):
         Returns:
             str: observation for the agent
         """
-        if not SCRIPTS:
+        scripts = scripts_dir()
+        if not scripts:
             return "Error: KALISCRIPTS environment variable is not set."
 
         # Sanitize the filename to prevent path traversal
@@ -33,11 +42,12 @@ class WriteFile(BaseModel):
         if not safe_name:
             safe_name = "unnamed_file.txt"
 
-        scripts_dir = os.path.realpath(SCRIPTS)
+        scripts_path = os.path.realpath(scripts)
         # Resolve symlinks *before* the containment check: a symlink inside
-        # SCRIPTS pointing outside it would otherwise be followed by open().
-        filepath = os.path.realpath(os.path.join(scripts_dir, safe_name))
-        if filepath == scripts_dir or os.path.dirname(filepath) != scripts_dir:
+        # the scripts directory pointing outside it would otherwise be
+        # followed by open().
+        filepath = os.path.realpath(os.path.join(scripts_path, safe_name))
+        if filepath == scripts_path or os.path.dirname(filepath) != scripts_path:
             return f"Error: Invalid filename '{self.file_name}'"
 
         try:
