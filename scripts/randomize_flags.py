@@ -42,6 +42,9 @@ SIMPLE_TOKEN_RE = re.compile(r'^[A-Za-z0-9]{8,64}$')
 TARGET_RE = re.compile(r'^(in-vitro|real-world)_(.+)_(vm\d+[ab]?)$')
 FLAG_FILENAMES = ('flag', 'flag.txt')
 
+# Files larger than this are not scanned for a duplicate flag token.
+MAX_SCAN_BYTES = 5 * 1024 * 1024
+
 
 def find_flag_file(level: str, category: str, vmid: str) -> Path | None:
     """Locate the on-disk flag file for a VM, tolerating vm5 -> vm5a/vm5b."""
@@ -51,6 +54,29 @@ def find_flag_file(level: str, category: str, vmid: str) -> Path | None:
             path = vm_dir / name
             if path.is_file():
                 return path
+    return None
+
+
+def flag_referenced_elsewhere(flag_path: Path, token: str) -> str | None:
+    """Name of another file in the VM directory that also contains ``token``.
+
+    A few tasks derive their flag from an artifact the target serves rather
+    than from the flag file itself -- the Heartbleed VM leaks its TLS private
+    key and the flag is a slice of that key, so the token also appears in
+    ``local.key``. Rewriting only the flag file (and games.json) would leave
+    the task internally inconsistent, so such entries must be left untouched.
+    """
+    needle = token.encode()
+    for sibling in sorted(flag_path.parent.rglob('*')):
+        if not sibling.is_file() or sibling == flag_path:
+            continue
+        try:
+            if sibling.stat().st_size > MAX_SCAN_BYTES:
+                continue
+            if needle in sibling.read_bytes():
+                return str(sibling.relative_to(flag_path.parent))
+        except OSError:
+            continue
     return None
 
 
@@ -73,7 +99,7 @@ def randomize(dry_run: bool = False) -> int:
     new_games_text = raw_games_text
 
     for level, categories in list(games.items()):
-        for category, entries in list(categories.items()):
+        for entries in list(categories.values()):
             for entry in list(entries):
                 target = entry.get('target')
                 if not target:
@@ -99,9 +125,17 @@ def randomize(dry_run: bool = False) -> int:
                     skipped += 1
                     continue
 
+                referenced_in = flag_referenced_elsewhere(flag_path, old_flag)
+                if referenced_in is not None:
+                    print(f'[skip] {target}: flag also appears in {referenced_in}; '
+                          'regenerating it would desync the task, leaving untouched')
+                    skipped += 1
+                    continue
+
                 raw_flag_file = flag_path.read_text()
                 if raw_flag_file.count(old_flag) != 1:
-                    print(f'[skip] {target}: flag not found exactly once in {flag_path}, leaving untouched')
+                    print(f'[skip] {target}: flag not found exactly once in '
+                          f'{flag_path}, leaving untouched')
                     skipped += 1
                     continue
 
@@ -115,11 +149,12 @@ def randomize(dry_run: bool = False) -> int:
                     r'("flag"\s*:\s*")' + re.escape(old_flag) + r'(")'
                 )
                 new_games_text, n_replaced = flag_re.subn(
-                    lambda m: m.group(1) + new_flag + m.group(2),
+                    lambda m, new_flag=new_flag: m.group(1) + new_flag + m.group(2),
                     raw_games_text,
                 )
                 if n_replaced != 1:
-                    print(f'[skip] {target}: flag not found exactly once in games.json, leaving untouched')
+                    print(f'[skip] {target}: flag not found exactly once in '
+                          'games.json, leaving untouched')
                     skipped += 1
                     continue
                 raw_games_text = new_games_text
