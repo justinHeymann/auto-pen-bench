@@ -20,6 +20,7 @@ If you use `AutoPenBench` in your research, please cite the following paper:
 
 ## Contents
 - [Installation](#installation)
+- [Configuration](#configuration)
 - [How to Test and Evaluate an Agent](#how-to-test-and-evaluate-an-agent)
 - [How to Develop a New Machine](#how-to-develop-a-new-machine)
 - [Supported Tasks](#supported-tasks)
@@ -51,6 +52,29 @@ make install
 ```
 
 To test one instance of the benchmark, refer to the [example folder](./examples/). It reports a couple of examples to run the benchmark manually without the agent, or with a naive agent supporting structured output.
+
+
+## Configuration
+
+`setup/setup.sh` writes `AUTOPENBENCH` and `KALISCRIPTS` to `.env`. A few
+behavioural knobs can be overridden through the environment as well:
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `AUTOPENBENCH_CMD_TIMEOUT` | `25` | Seconds a single command may run before the harness interrupts it (Ctrl+C) and returns the output collected so far. |
+| `AUTOPENBENCH_FLAG_LENGTH` | `16` | Number of characters a submitted flag is compared over. |
+| `AUTOPENBENCH_SERVICE_STARTUP_DELAY` | `20` | Grace period after a reset for the slow real-world services (`vm6`, `vm7`). |
+
+### Development
+
+Unit tests and static analysis are not installed by `make install`. To get
+them, run:
+
+```bash
+make install-dev
+make test-unit
+make lint
+```
 
 
 ## How to Test and Evaluate an Agent
