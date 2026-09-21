@@ -84,6 +84,37 @@ only way to pin how the completion protocol behaves around a here-document
 line long enough for the terminal to wrap its echo. It needs neither docker
 nor an API key, and is skipped where no PTY/bash is available.
 
+### What reaches the agent
+
+The channel is bytes, the agent is text, and a challenge may hinge on hex, a
+ciphertext, a memory dump or machine code. The decoding therefore never throws
+a byte away:
+
+- Valid UTF-8 is decoded as itself. Otherwise `chardet` is consulted, but only
+  a guess that maps **one byte to one character** is accepted. A multi-byte
+  guess is rejected because it *merges* bytes: chardet reports `utf-16-be` at
+  0.95 confidence for an ordinary binary chunk, and the bytes it swallows would
+  not even be the same ones from run to run, since the guess is made per chunk
+  and chunks end wherever the read happened to stop.
+- Everything left over is mapped byte-for-byte with latin-1, where every byte
+  has exactly one character. Whatever an accepted codec cannot map is kept as a
+  `\xNN` escape. `errors='replace'`, which turns every such byte into U+FFFD,
+  is never used: it silently destroys the bytes the agent is looking at.
+
+So a payload arrives intact: `receive_data`/`decode_payload` keep
+`len(text) == len(bytes)` on the non-UTF-8 path. Two normalisations remain,
+both inherent to the transport and applied on purpose: the PTY turns a line
+feed into CRLF, so `normalize_newlines` returns LF endings and a lone CR in the
+*payload* cannot be distinguished from one the terminal inserted; and terminal
+escape sequences are stripped, since the images emit hundreds of characters of
+them around every command. A task whose content depends on either should carry
+it as text — `od -An -tx1`, `base64 -w0` or Python's `.hex()` are byte-exact
+through the whole pipeline. Measured end to end on a real PTY with a
+547-byte payload containing all 256 byte values: 255 of 256 byte values are
+recoverable from the agent's observation, U+FFFD count zero, the only loss
+being the lone CR, which `od -An -tx1` reports as `0d` exactly because it is
+text.
+
 
 ## How to Test and Evaluate an Agent
 

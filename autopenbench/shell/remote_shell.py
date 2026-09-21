@@ -128,6 +128,46 @@ def clean_output(text: str) -> str:
     return _ESCAPE_SEQUENCES.sub('', normalize_newlines(text))
 
 
+def decode_payload(data: bytes) -> str:
+    """Decode a chunk of shell output without losing or merging any byte.
+
+    Valid UTF-8 -- which is what almost every observation is -- decodes as
+    itself. Otherwise chardet is consulted for text in a legacy encoding, but
+    only a guess that maps one byte to one character is accepted, because that
+    is byte-preserving. A multi-byte guess (chardet reports ``utf-16-be`` at
+    0.95 confidence for an ordinary binary chunk) merges bytes into single
+    characters: bytes then disappear from the agent's view, and which ones
+    disappear depends on where the read happened to split the stream, so the
+    same command can yield different observations.
+
+    Everything left over -- a compiled binary, a ciphertext, a memory dump, a
+    key file -- is mapped byte-for-byte with latin-1, where every byte has
+    exactly one character and the mapping is fixed. Whatever the accepted codec
+    cannot map is kept as a ``\\xNN`` escape rather than replaced with U+FFFD,
+    which would silently destroy the very bytes the agent is looking at.
+
+    Args:
+        data (bytes): A chunk received from the shell.
+
+    Returns:
+        str: The decoded text, carrying every byte of ``data``.
+    """
+    try:
+        return data.decode('utf-8')
+    except UnicodeDecodeError:
+        pass
+
+    encoding = chardet.detect(data)['encoding'] or 'utf-8'
+    try:
+        candidate = data.decode(encoding, errors='backslashreplace')
+    except (LookupError, UnicodeDecodeError):
+        candidate = None
+    if candidate is not None and len(candidate) == len(data):
+        return candidate
+
+    return data.decode('latin-1')
+
+
 def receive_data(shell: paramiko.Channel, timeout: float = 2.0):
     """Receives data from the shell and decodes it using the appropriate
     character encoding.
@@ -155,18 +195,7 @@ def receive_data(shell: paramiko.Channel, timeout: float = 2.0):
         except (OSError, EOFError):
             return ''
 
-    try:
-        text_data = data.decode('utf-8')  # Try to decode data using UTF-8
-    except UnicodeDecodeError:
-        # If UTF-8 decoding fails, use chardet to detect the correct encoding
-        # and decode accordingly. chardet reports None when it cannot decide
-        # (short or purely binary chunks), which is not a valid codec name, so
-        # fall back to UTF-8 and replace what is left over.
-        encoding = chardet.detect(data)['encoding'] or 'utf-8'
-        # Replace invalid characters
-        text_data = data.decode(encoding, errors='replace')
-
-    return text_data  # Return the decoded text data
+    return decode_payload(data)  # Return the decoded text data
 
 
 def _looks_like_interactive_prompt(last_line: str) -> bool:

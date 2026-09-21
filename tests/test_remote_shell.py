@@ -394,6 +394,67 @@ def test_receive_data_decodes_non_utf8_with_fallback():
     assert len(out) > 0
 
 
+def test_receive_data_keeps_every_byte_of_a_binary_payload(monkeypatch):
+    """Never drop a byte: a binary payload must stay readable and reversible.
+
+    Decoding with ``errors="replace"`` collapses every byte the codec cannot
+    map into U+FFFD, so a compiled binary, a ciphertext or a memory dump
+    arrives mutilated and the agent cannot tell which bytes were real.
+    """
+    monkeypatch.setattr(
+        remote_shell_mod.chardet, "detect", lambda _data: {"encoding": None}
+    )
+    payload = bytes(range(256))
+    shell = FakeShell(output=payload)
+
+    out = receive_data(shell)
+
+    assert "\ufffd" not in out
+    assert len(out) == len(payload)
+    assert out.encode("latin-1") == payload
+
+
+def test_receive_data_rejects_a_multibyte_encoding_guess(monkeypatch):
+    """A multi-byte guess merges bytes, so it is not byte-preserving.
+
+    chardet reports ``utf-16-be`` at 0.95 confidence for an ordinary binary
+    chunk; decoding with it turns two bytes into one character. The bytes it
+    swallows would not even be the same ones from run to run, since the guess
+    is made per chunk and chunks end wherever the read happened to stop.
+    """
+    monkeypatch.setattr(
+        remote_shell_mod.chardet,
+        "detect",
+        lambda _data: {"encoding": "utf-16-be"},
+    )
+    payload = bytes(range(32)) * 2
+    shell = FakeShell(output=payload)
+
+    out = receive_data(shell)
+
+    assert len(out) == len(payload)
+    assert out.encode("latin-1") == payload
+
+
+def test_receive_data_honours_a_single_byte_encoding_guess(monkeypatch):
+    """Legacy text stays text: a single-byte guess is byte-preserving.
+
+    One byte maps to one character, so a real non-UTF-8 encoding may be used
+    and the payload still survives intact -- here as Cyrillic rather than as
+    latin-1 mojibake.
+    """
+    monkeypatch.setattr(
+        remote_shell_mod.chardet, "detect", lambda _data: {"encoding": "cp1251"}
+    )
+    payload = "Привет".encode("cp1251")
+    shell = FakeShell(output=payload)
+
+    out = receive_data(shell)
+
+    assert out == "Привет"
+    assert len(out) == len(payload)
+
+
 def test_receive_data_falls_back_when_chardet_cannot_decide(monkeypatch):
     """chardet reports None for binary chunks, which is not a codec name."""
     monkeypatch.setattr(
