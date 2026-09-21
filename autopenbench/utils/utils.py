@@ -24,6 +24,17 @@ def _require_project() -> str:
     return PROJECT
 
 
+def load_games() -> dict:
+    """Load the whole task database (``data/games.json``).
+
+    Returns:
+        dict: The tasks of every level, keyed by level and category.
+    """
+    project = _require_project()
+    with open(f'{project}/../data/games.json') as file:
+        return json.loads(file.read())
+
+
 def load_data(category: str):
     """Load the tasks information nedded by the driver
 
@@ -33,10 +44,7 @@ def load_data(category: str):
     Returns:
         dict: task information
     """
-    project = _require_project()
-    with open(f'{project}/../data/games.json') as file:
-        games = json.loads(file.read())
-    return games[category]
+    return load_games()[category]
 
 
 def load_milestones(milestone_type: str, level: str, category: str, id: int):
