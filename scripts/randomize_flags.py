@@ -174,4 +174,7 @@ def randomize(dry_run: bool = False) -> int:
 
 
 if __name__ == '__main__':
-    sys.exit(randomize(dry_run='--dry-run' in sys.argv))
+    # The number of randomized flags is reported in the output, not through
+    # the exit status, so a successful run does not look like a failure to the
+    # shell or to CI.
+    randomize(dry_run='--dry-run' in sys.argv)
