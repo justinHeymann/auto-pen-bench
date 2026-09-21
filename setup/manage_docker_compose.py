@@ -1,12 +1,18 @@
 import argparse
 import os
 from glob import glob
+
 import yaml
 
 # Empty docker-compose
 default = {
     'version': '3',
-    'networks': {'net-main_network': {'internal': True, 'ipam': {'config': [{'subnet': '192.168.0.0/16'}]}}}
+    'networks': {
+        'net-main_network': {
+            'internal': True,
+            'ipam': {'config': [{'subnet': '192.168.0.0/16'}]},
+        },
+    },
 }
 
 
@@ -56,8 +62,7 @@ def update_docker_compose(benchmark, category, task_type, machine_id):
     machine_id = int(machine_id)
     # Extract the third octet of the IP
     with open(
-        f'{benchmark}/machines/{category}/{task_type}/docker-compose.yml',
-        'r'
+        f'{benchmark}/machines/{category}/{task_type}/docker-compose.yml'
     ) as file:
         compose_data = yaml.safe_load(file)
     # Extract existing services

@@ -1,12 +1,26 @@
-from autopenbench.driver import PentestDriver
-from autopenbench.tools import *
-from autopenbench.utils import load_data
-from termcolor import cprint
+import ast
+import re
 import sys
 import time
-import re
+
+from termcolor import cprint
+
+from autopenbench.driver import PentestDriver
+from autopenbench.tools import ExecuteBash, FinalAnswer, SSHConnect, WriteFile
+from autopenbench.utils import load_data
 
 INVITRO = 'benchmark/machines/in-vitro'
+
+# A solution line is an expression that builds one of the benchmark's tool
+# objects. Only those classes (plus the dynamically extracted ``fname``) are
+# exposed to the evaluated expression, and builtins are disabled, so a
+# solution file can never reach the rest of this process.
+SOLUTION_NAMESPACE = {
+    'ExecuteBash': ExecuteBash,
+    'FinalAnswer': FinalAnswer,
+    'SSHConnect': SSHConnect,
+    'WriteFile': WriteFile,
+}
 
 
 def extract_content(target: str, cmd: str = ''):
@@ -14,7 +28,7 @@ def extract_content(target: str, cmd: str = ''):
 
     Args:
         target (str): task name
-        cmd (str, optional): command pointing to the content to extract. 
+        cmd (str, optional): command pointing to the content to extract.
         Defaults to ''.
 
     Returns:
@@ -30,16 +44,16 @@ def extract_content(target: str, cmd: str = ''):
         match = re.search(pattern, cmd)
         content = match.group(1) if match else None
     elif target == 'in-vitro_network_security_vm4':
-        with open(f'{INVITRO}/network_security/vm4/solution.py', 'r') as file:
+        with open(f'{INVITRO}/network_security/vm4/solution.py') as file:
             content = file.read()
     elif target == 'in-vitro_network_security_vm5':
-        with open(f'{INVITRO}/network_security/vm5a/solution.py', 'r') as file:
+        with open(f'{INVITRO}/network_security/vm5a/solution.py') as file:
             content = file.read()
     elif target == 'in-vitro_cryptography_vm2':
-        with open(f'{INVITRO}/cryptography/vm2/solution.py', 'r') as file:
+        with open(f'{INVITRO}/cryptography/vm2/solution.py') as file:
             content = file.read()
     elif target == 'in-vitro_cryptography_vm3':
-        with open(f'{INVITRO}/cryptography/vm3/solution.py', 'r') as file:
+        with open(f'{INVITRO}/cryptography/vm3/solution.py') as file:
             content = file.read()
     return content
 
@@ -74,7 +88,7 @@ SOLUTIONS = f'benchmark/solutions/{LEVEL}/{CATEGORY}'  # Solutions path
 game = load_data(LEVEL)[CATEGORY][GAME_ID]
 
 # Load solutions
-with open(f'{SOLUTIONS}/vm{GAME_ID}.txt', 'r') as file:
+with open(f'{SOLUTIONS}/vm{GAME_ID}.txt') as file:
     solutions = file.readlines()
 
 # Initialize the driver and reset
@@ -91,9 +105,19 @@ for step, solution in enumerate(solutions):
         if content is not None:
             fname = content
 
-    # Create the action (`fname` is injected into the eval namespace so
-    # solutions can reference the extracted content)
-    action = eval(solution, {**globals(), 'fname': fname})
+    # Create the action (`fname` is injected into the namespace so solutions
+    # can reference the extracted content). Parse first so a malformed
+    # solution reports its step instead of raising deep inside eval().
+    try:
+        code = compile(ast.parse(solution, mode='eval'), '<solution>', 'eval')
+    except SyntaxError as error:
+        cprint(f'INVALID SOLUTION at step {step + 1}: {error}', 'red')
+        sys.exit(1)
+    action = eval(
+        code,
+        {'__builtins__': {}},
+        {**SOLUTION_NAMESPACE, 'fname': fname},
+    )
     time.sleep(.5)
     cprint(f'ACTION: {solution}', 'yellow')
 
