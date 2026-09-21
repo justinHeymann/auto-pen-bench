@@ -87,6 +87,47 @@ class PromptShell(FakeShell):
             else self.prompt.encode()
 
 
+class RunawayShell(FakeShell):
+    """Fake shell whose first marker-carrying command never finishes.
+
+    Models the shipped incident: a loop scanning 254 subnets kept echoing
+    progress lines, so every later observation returned the loop's output
+    instead of the command that was actually sent. Ctrl+C stops it.
+    """
+
+    runaway_cmd = "for i in {1..254}"
+    BUFFERED_LINES = 3
+
+    def __init__(self):
+        super().__init__(b"")
+        self.running = False
+        self.pending = 0
+
+    def send(self, value):
+        super().send(value)
+        if value == "\x03":
+            self.running = False
+            self.pending = 0
+            self.output = b"^C\nroot@kali:~# "
+        elif self.runaway_cmd in value:
+            self.running = True
+            self.pending = self.BUFFERED_LINES
+            self.output = b"Scanning 192.168.31.0/24\n"
+        else:
+            match = re.search(r"__AUTOPENBENCH_DONE_\d+__", value)
+            if match and not self.running:
+                self.output = f"uid=0(root)\n{match.group(0)}\n".encode()
+
+    def recv_ready(self):
+        return bool(self.output) or self.pending > 0
+
+    def recv(self, _size):
+        if self.pending > 0:
+            self.pending -= 1
+            return b"Scanning 192.168.32.0/24\n"
+        return super().recv(_size)
+
+
 def test_write_file_sanitizes_name_and_preserves_content(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "autopenbench.tools.write_file.SCRIPTS", str(tmp_path)
@@ -368,9 +409,56 @@ def test_execute_cmd_times_out_when_marker_never_arrives(monkeypatch):
     assert "Timed out waiting for shell prompt" in out
 
 
+def test_execute_cmd_interrupts_a_command_that_outlives_its_deadline(monkeypatch):
+    """A long-running command must not outlive its step.
+
+    The shipped incident: an agent launched a 254-subnet scan loop, the
+    harness gave up waiting for the marker and returned, and the loop kept
+    writing to the channel -- every later observation showed its output
+    instead of the command that was actually sent, blinding the agent for the
+    rest of the run.
+    """
+    shell = RunawayShell()
+    ticks = itertools.count(0, 20)
+    monkeypatch.setattr(
+        remote_shell_mod.time, "monotonic", lambda: next(ticks)
+    )
+    monkeypatch.setattr(remote_shell_mod.time, "sleep", lambda _seconds: None)
+    remote = RemoteShell(shell)
+
+    out = remote.execute_cmd(
+        "for i in {1..254}; do nmap -sn 192.168.$i.0/24; done"
+    )
+
+    assert "\x03" in shell.sent
+    assert "Scanning" in out                      # collected output is kept
+    assert "without printing its completion marker" in out
+    assert "Timed out waiting for shell prompt" in out
+
+    # The session is usable again: the next command gets its own result
+    # instead of the loop's leftovers.
+    follow_up = remote.execute_cmd("id")
+
+    assert "uid=0(root)" in follow_up
+    assert "Scanning" not in follow_up
+
+
+def test_command_timeout_seconds_is_configurable(monkeypatch):
+    """The per-command budget is tunable, and the default stays below the
+    runner's action timeout (genai's ACTION_TIMEOUT_SECONDS, 30 s) so the
+    harness interrupts the command before the runner aborts mid-read."""
+    assert remote_shell_mod.command_timeout_seconds() == (
+        remote_shell_mod.DEFAULT_COMMAND_TIMEOUT_SECONDS
+    )
+    assert remote_shell_mod.DEFAULT_COMMAND_TIMEOUT_SECONDS < 30
+
+    monkeypatch.setenv("AUTOPENBENCH_CMD_TIMEOUT", "5.5")
+    assert remote_shell_mod.command_timeout_seconds() == 5.5
+
+
 def test_execute_cmd_sudo_uses_password_heuristic_without_marker(monkeypatch):
     shell = FakeShell(output=b"[sudo] password for student:")
-    # Jump past the 15 s password-prompt deadline without sleeping.
+    # Jump past the password-prompt deadline without sleeping.
     ticks = itertools.count(0, 10)
     monkeypatch.setattr(
         remote_shell_mod.time, "monotonic", lambda: next(ticks)

@@ -1,7 +1,26 @@
+import os
 import time
 import socket
 import chardet
 import paramiko
+
+
+# Seconds allowed for a single command to print its completion marker. Keep
+# this below the runner's action timeout (genai's ACTION_TIMEOUT_SECONDS, 30 s
+# by default): the harness then interrupts the command itself and returns the
+# output collected so far, instead of the runner aborting mid-read and leaving
+# the command running on the remote host.
+DEFAULT_COMMAND_TIMEOUT_SECONDS = 25.0
+
+
+def command_timeout_seconds() -> float:
+    """Seconds to wait for a command's completion marker before interrupting.
+
+    Parsed lazily so a malformed ``AUTOPENBENCH_CMD_TIMEOUT`` raises where it
+    is used rather than at import time.
+    """
+    return float(os.environ.get('AUTOPENBENCH_CMD_TIMEOUT',
+                                DEFAULT_COMMAND_TIMEOUT_SECONDS))
 
 
 def receive_data(shell: paramiko.Channel, timeout: float = 2.0):
@@ -103,15 +122,25 @@ class RemoteShell():
                 return False
         return True
 
-    def _interrupt_foreground_process(self) -> str:
-        """Escape a foreground command that is stuck waiting for input.
+    def _interrupt_foreground_process(
+            self, reason: str = 'at an interactive prompt') -> str:
+        """Escape a command that is still running when its budget runs out.
 
-        Used for commands that carry a completion marker: such a program has
-        no way to be answered (the marker was already typed into it), so it
-        keeps reading the channel, swallows the *next* command and its
-        marker, and shifts every later observation. Sending Ctrl+C makes the
-        shell return to a usable prompt instead of leaving the session
-        permanently desynced.
+        Such a command is a problem for two reasons. A program reading the
+        channel (like `ssh` asking for a password) already swallowed the
+        completion marker, so it would eat the *next* command and its marker
+        too. A long-running command (a shell loop, an endless scan) keeps
+        writing to the channel, so every later observation returns its output
+        instead of the command that was actually sent. Interrupting it makes
+        the shell usable again, which is what both cases need.
+
+        Commands that are meant to prompt (sudo/su, sent without a marker) are
+        deliberately not interrupted -- the agent answers those with its next
+        command.
+
+        Args:
+            reason (str): Why the command was interrupted, quoted in the note
+                returned to the agent.
 
         Returns:
             str: Whatever the interrupt produced, plus a note for the agent.
@@ -134,8 +163,8 @@ class RemoteShell():
         # misread as the next command's output.
         self._drain()
         return interrupted + (
-            '\n[!] The command timed out at an interactive prompt; it was '
-            'interrupted (Ctrl+C) so the shell stays usable.'
+            f'\n[!] The command timed out {reason}; it was interrupted '
+            '(Ctrl+C) so the shell stays usable.'
         )
 
     def check_metasploit_shell(self, out: str):
@@ -182,14 +211,14 @@ class RemoteShell():
 
         if use_marker:
             marker = f'__AUTOPENBENCH_DONE_{time.monotonic_ns()}__'
-            deadline = time.monotonic() + 15.0
+            deadline = time.monotonic() + command_timeout_seconds()
             self.shell.send(
                 f'{cmd}\nprintf "\\n{marker}\\n"\n'
             )  # Send the command and an unambiguous completion marker
             out = receive_data(self.shell, timeout=5.0)  # Receive initial data from the shell
         else:
             marker = None
-            deadline = time.monotonic() + 15.0
+            deadline = time.monotonic() + command_timeout_seconds()
             self.shell.send(cmd+'\n')  # Send the command to the shell
             out = receive_data(self.shell, timeout=1.0)  # Receive initial data from the shell
 
@@ -292,6 +321,19 @@ class RemoteShell():
                         break
 
                 if time.monotonic() >= deadline:
+                    # The command never printed its completion marker: it is
+                    # either stuck at a prompt or simply outlived its budget
+                    # (a shell loop, an endless scan). Left running, it would
+                    # keep writing to the channel and every later observation
+                    # would show its output instead of its own command's, so
+                    # marker-carrying commands are interrupted here as well.
+                    # Commands sent without a marker (sudo/su) keep their
+                    # prompt alive: the agent answers it with its next
+                    # command.
+                    if marker is not None:
+                        out += self._interrupt_foreground_process(
+                            'without printing its completion marker'
+                        )
                     # Strip marker before returning on timeout
                     return out.replace(f'\n{marker}\n', '\n').replace(marker, '') + '\n[!] Timed out waiting for shell prompt after running command.'
 
