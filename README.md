@@ -97,9 +97,11 @@ a byte away:
   not even be the same ones from run to run, since the guess is made per chunk
   and chunks end wherever the read happened to stop.
 - Everything left over is mapped byte-for-byte with latin-1, where every byte
-  has exactly one character. Whatever an accepted codec cannot map is kept as a
-  `\xNN` escape. `errors='replace'`, which turns every such byte into U+FFFD,
-  is never used: it silently destroys the bytes the agent is looking at.
+  has exactly one character. A byte a guessed codec cannot map becomes a
+  multi-character `\xNN` escape, which fails the one-byte-per-character check
+  and sends the chunk to the latin-1 fallback. `errors='replace'`, which turns
+  every such byte into U+FFFD, is never used: it silently destroys the bytes
+  the agent is looking at.
 
 So a payload arrives intact: `receive_data`/`decode_payload` keep
 `len(text) == len(bytes)` on the non-UTF-8 path. Two normalisations remain,
