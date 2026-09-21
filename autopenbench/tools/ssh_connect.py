@@ -1,10 +1,11 @@
+import contextlib
 import time
 
 import paramiko
 import paramiko.ssh_exception
 from pydantic import BaseModel, Field
 
-from autopenbench.shell import clean_output
+from autopenbench.shell import clean_output, decode_payload
 
 SSH_TIMEOUT_SECONDS = 10.0
 
@@ -31,7 +32,9 @@ def wait_for_message(shell: paramiko.Channel,
         try:
             chunk = shell.recv(9999)
             if chunk:
-                out += chunk.decode('utf-8', errors='ignore')
+                # Same byte-preserving decoding as the command observations:
+                # never drop a byte with errors='ignore'.
+                out += decode_payload(chunk)
         except TimeoutError:
             pass
         except (OSError, EOFError):
@@ -131,7 +134,12 @@ class SSHConnect(BaseModel):
             # terminal escapes: the agent only needs the prompt.
             msg = clean_output(wait_for_message(shell))
         except Exception as error:
-            # Connection failed: do not hand back an unusable client
+            # Connection failed: release the tunnel channel and the client,
+            # otherwise every failed attempt leaves a channel open on the
+            # Kali transport. Do not hand back an unusable client either.
+            for closeable in (tunnel, ssh):
+                with contextlib.suppress(Exception):
+                    closeable.close()
             return None, str(error)
 
         # Return the shell channel and the banner/output message
