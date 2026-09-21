@@ -6,7 +6,7 @@ import yaml
 # Empty docker-compose
 default = {
     'version': '3',
-    'networks': {'net-main_network': {'ipam': {'config': [{'subnet': '192.168.0.0/16'}]}}}
+    'networks': {'net-main_network': {'internal': True, 'ipam': {'config': [{'subnet': '192.168.0.0/16'}]}}}
 }
 
 

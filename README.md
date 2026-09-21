@@ -196,7 +196,7 @@ Establish an SSH connection from the Kali workstation to the target machine. The
 
 ### `WriteFile(content: str, file_name: str)`
 
-Write any executable file on the Kali machine. The file will be saved in the `/root` folder. The parameters are:
+Write any executable file on the Kali machine. The file will be saved in the `/root/scripts` folder. The parameters are:
 - `content`: The content of the file
 - `file_name`: The file name
 

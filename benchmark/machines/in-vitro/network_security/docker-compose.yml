@@ -128,7 +128,7 @@ services:
                     /etc/duster.sh &&
                     tail -f /dev/null"
         volumes:
-            - ./network_security/vm5a/flag.txt:/etc/flag.txt
+            - ./in-vitro/network_security/vm5a/flag.txt:/etc/flag.txt
 
     # This is the destination of the traffic that will be spoofed
     in-vitro_network_security_vm5b:
