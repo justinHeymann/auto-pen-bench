@@ -58,6 +58,51 @@ def test_driver_routes_write_file(monkeypatch):
     assert done is False
 
 
+# --- Failures reach the agent as observations --------------------------------
+
+
+def test_driver_reports_a_raising_tool_as_an_observation(monkeypatch):
+    """A raising tool must not abort the run.
+
+    The MCP server wraps driver.step() for its own callers, but
+    benchmark/tests/machine_test.py and the example notebooks call it bare --
+    a dropped SSH session there used to end the whole test run with a
+    traceback instead of letting the agent re-connect.
+    """
+    driver = PentestDriver("task", "flag", "target")
+
+    def _boom(_self, _ssh_kali):
+        raise RuntimeError("kex failed")
+
+    monkeypatch.setattr(SSHConnect, "run", _boom)
+
+    out, done = driver.step(SSHConnect(
+        ssh_ipaddr="192.168.1.10", ssh_port=22,
+        ssh_username="student", ssh_password="password",
+    ))
+
+    assert done is False
+    assert "Error while running SSHConnect" in out
+    assert "kex failed" in out
+
+
+def test_driver_reports_a_failed_kali_reconnect(monkeypatch):
+    """Rebuilding the controller shell can fail too, and that must be an
+    observation as well."""
+    driver = PentestDriver("task", "flag", "target")
+    monkeypatch.setattr(
+        driver, "_connect_to_kali",
+        Mock(side_effect=OSError("connection refused")),
+    )
+
+    out, done = driver.step(
+        ExecuteBash(machine_ipaddr="192.168.0.5", cmd="id")
+    )
+
+    assert done is False
+    assert "connection refused" in out
+
+
 # --- Sessions ---------------------------------------------------------------
 
 
@@ -188,6 +233,22 @@ def test_driver_appends_hint_to_host_key_prompts():
     assert "host-key prompt" in out
 
 
+def test_driver_appends_the_msf_hint_to_a_meterpreter_prompt():
+    """The shell layer labels a Metasploit session `meterpreter >`, which
+    names neither `msf` nor `msfconsole`: matching only `msf` left the agent
+    without the hint that its next command goes to that session."""
+    driver = PentestDriver("task", "flag", "target")
+    shell = Mock()
+    shell.execute_cmd.return_value = "Command shell session 1 opened\nmeterpreter >"
+    driver.remotes["192.168.1.10"] = shell
+
+    out, _ = driver.step(
+        ExecuteBash(machine_ipaddr="192.168.1.10", cmd="id")
+    )
+
+    assert "interactive msfconsole" in out
+
+
 # --- Flag submission --------------------------------------------------------
 
 
@@ -246,3 +307,15 @@ def test_flag_longer_than_the_configured_length_still_matches():
     )
 
     assert (output, done) == ("You Won!", True)
+
+
+def test_flag_is_stripped_when_it_is_loaded():
+    """data/games.json is hand-edited, so a flag may carry stray whitespace.
+
+    Stripping only the *submission* would make such a task impossible to
+    solve, and look like an agent failure rather than a data problem.
+    """
+    driver = PentestDriver("task", "  Abcdef1234567890\t", "target")
+
+    assert driver.flag == "Abcdef1234567890"
+    assert driver.step(FinalAnswer(flag="Abcdef1234567890")) == ("You Won!", True)
