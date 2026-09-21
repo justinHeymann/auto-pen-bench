@@ -1,8 +1,12 @@
+import logging
 import os
+import re
 import time
-import socket
+
 import chardet
 import paramiko
+
+logger = logging.getLogger(__name__)
 
 
 # Seconds allowed for a single command to print its completion marker. Keep
@@ -21,6 +25,32 @@ def command_timeout_seconds() -> float:
     """
     return float(os.environ.get('AUTOPENBENCH_CMD_TIMEOUT',
                                 DEFAULT_COMMAND_TIMEOUT_SECONDS))
+
+
+# Network tools the benchmark deliberately withholds from the agent; the
+# tasks that need them ship an adapted exploit instead.
+FORBIDDEN_NET_TOOLS = frozenset({'nc', 'ncat', 'netcat', 'socat'})
+
+# Shell control operators that start a new command within the same line.
+_SEGMENT_SEPARATORS = re.compile(r'[;&|()\n]+')
+
+
+def uses_forbidden_net_tool(cmd: str) -> bool:
+    """True if any command in ``cmd`` invokes a withheld network tool.
+
+    Only the *program* of each shell-separated segment is inspected, so an
+    unrelated mention of the name (e.g. ``echo nc``) is not flagged, while
+    path-qualified and suffixed forms (``/usr/bin/nc``, ``nc.openbsd``) and
+    separator-prefixed forms (``;nc``) still are.
+    """
+    for segment in _SEGMENT_SEPARATORS.split(cmd):
+        tokens = segment.strip().split()
+        if not tokens:
+            continue
+        program = os.path.basename(tokens[0].strip('\'"'))
+        if program.split('.')[0] in FORBIDDEN_NET_TOOLS:
+            return True
+    return False
 
 
 def receive_data(shell: paramiko.Channel, timeout: float = 2.0):
@@ -43,11 +73,11 @@ def receive_data(shell: paramiko.Channel, timeout: float = 2.0):
             if not data:
                 return ''
             break
-        except socket.timeout:
+        except TimeoutError:
             if time.monotonic() >= deadline:
                 return ''
             time.sleep(0.1)
-        except (socket.error, OSError, EOFError):
+        except (OSError, EOFError):
             return ''
 
     try:
@@ -62,7 +92,27 @@ def receive_data(shell: paramiko.Channel, timeout: float = 2.0):
     return text_data  # Return the decoded text data
 
 
-class RemoteShell():
+def _looks_like_interactive_prompt(last_line: str) -> bool:
+    """True when the last output line looks like a program waiting for input.
+
+    Covers shell prompts and yes/no questions, pagers and msfconsole, plus
+    `key:` and `>` continuations -- excluding the `::`, `-->` and `<` forms
+    that legitimately end a command's output.
+    """
+    if not last_line:
+        return False
+    if last_line[-1] in ('?', '$', '#'):
+        return True
+    lowered = last_line.lower()
+    if any(token in lowered for token in
+           ('yes/no/[fingerprint]', '[y/n]', '--more--', 'msf6')):
+        return True
+    if last_line.endswith(':') and '::' not in last_line and '-->' not in last_line:
+        return True
+    return last_line.endswith('>') and '<' not in last_line and '-->' not in last_line
+
+
+class RemoteShell:
     """A class to manage an interactive remote shell session.
 
     Args:
@@ -85,8 +135,10 @@ class RemoteShell():
         try:
             # Set a timeout for receiving data from the shell
             self.shell.settimeout(5.0)
-        except Exception:
-            pass
+        except Exception as error:
+            # Not fatal: receive_data() also guards against a channel that
+            # cannot be configured.
+            logger.debug('could not set channel timeout: %s', error)
 
     def _drain(self):
         """Discard any bytes still buffered from a previous command.
@@ -99,8 +151,10 @@ class RemoteShell():
         try:
             while self.shell.recv_ready():
                 self.shell.recv(65536)
-        except Exception:
-            pass
+        except Exception as error:
+            # A channel that cannot be drained is usually already dead;
+            # callers re-check liveness through is_alive().
+            logger.debug('could not drain channel: %s', error)
 
     def is_alive(self) -> bool:
         """True while the channel can still carry commands.
@@ -116,7 +170,8 @@ class RemoteShell():
         if callable(transport_attr):
             try:
                 transport = transport_attr()
-            except Exception:
+            except Exception as error:
+                logger.debug('could not read channel transport: %s', error)
                 return False
             if transport is not None and not transport.is_active():
                 return False
@@ -178,11 +233,11 @@ class RemoteShell():
             otherwise
         """
         # Parse the output line by line
-        for l in out.split('\n'):
-            if 'Command shell session' in l:
-                if 'opened' in l:
+        for line in out.split('\n'):
+            if 'Command shell session' in line:
+                if 'opened' in line:
                     return True  # If Metasploit shell session is open
-                if 'closed' in l:
+                if 'closed' in line:
                     return False  # If Metasploit shell session is closed
         return self.msfshell  # Return the current state of msfshell
 
@@ -196,18 +251,22 @@ class RemoteShell():
             str: The output from the shell after executing the command.
         """
         # Check if forbidden commands are being used (like netcat or socat)
-        for x in cmd.split(' '):
-            if x == 'nc' or x == 'socat':
-                return "Don't use netcat or socat!"
+        if uses_forbidden_net_tool(cmd):
+            return "Don't use netcat or socat!"
 
         # Flush any stale output left over from the previous command so it
         # cannot be misread as this command's result (see _drain docstring).
         self._drain()
 
-        # For commands that may prompt for password (sudo, su), use the timeout-based heuristic
-        # without the marker, to avoid the marker being consumed as a password.
-        # For other commands, use the marker for unambiguous completion detection.
-        use_marker = not (cmd[:4] == 'sudo' or cmd[:2] == 'su ' or cmd == 'su')
+        # For commands that may prompt for a password (sudo, su -- including
+        # `su -` and `su - root`), use the timeout-based heuristic *without*
+        # the marker: the harness would otherwise type the marker into the
+        # password prompt, where it is consumed as the password, and the
+        # command could never finish. Every other command gets the marker for
+        # unambiguous completion detection.
+        tokens = cmd.strip().split()
+        first_word = tokens[0] if tokens else ''
+        use_marker = first_word not in ('sudo', 'su')
 
         if use_marker:
             marker = f'__AUTOPENBENCH_DONE_{time.monotonic_ns()}__'
@@ -225,7 +284,7 @@ class RemoteShell():
         # Special handling for sudo commands. No completion marker was sent
         # for sudo/su (it could be consumed as the password), so the
         # timeout-based heuristic is used instead.
-        if cmd[:4] == 'sudo':
+        if first_word == 'sudo':
             # Password sudo: use the traditional timeout-based approach
             # (no marker sent, so nothing to consume as password)
             self.sudo = True  # Set sudo mode
@@ -240,9 +299,12 @@ class RemoteShell():
                     return out + '\n[!] Timed out waiting for sudo password prompt.'
                 time.sleep(.5)  # Wait before attempting to receive more data
                 out += receive_data(self.shell, timeout=1.0)  # Append new data
-            # After password flow, switch to non-sudo waiting logic
+            # After the password flow, sudo is no longer in progress. Control
+            # continues to the marker-stripping tail below; the non-sudo
+            # polling loop is intentionally skipped, because the sudo prompt
+            # has already been surfaced and the agent answers it with its next
+            # command.
             self.sudo = False
-            # Fall through to the non-sudo handling to wait for the final prompt
         else:
             # Handle non-sudo commands
             last_line = ' '
@@ -272,21 +334,7 @@ class RemoteShell():
                             last_line[-1] == '$' or last_line[-1] == '#'))
                     ):
                         break
-                    elif (last_line and last_line[-1] in ['?', '$', '#']) or \
-                            'yes/no/[fingerprint]' in last_line.lower() or \
-                            '[y/n]' in last_line.lower() or \
-                            '--more--' in last_line.lower() or \
-                            'msf6' in last_line.lower():
-                        retries += 1
-
-                    elif last_line and last_line[-1] == ':' and \
-                        '::' not in last_line and \
-                            '-->' not in last_line:
-                        retries += 1
-
-                    elif last_line and last_line[-1] == '>' and \
-                        '<' not in last_line and \
-                            '-->' not in last_line:
+                    elif _looks_like_interactive_prompt(last_line):
                         retries += 1
 
                     if 'What do you want to do about modified configuration '\
@@ -334,8 +382,10 @@ class RemoteShell():
                         out += self._interrupt_foreground_process(
                             'without printing its completion marker'
                         )
-                    # Strip marker before returning on timeout
-                    return out.replace(f'\n{marker}\n', '\n').replace(marker, '') + '\n[!] Timed out waiting for shell prompt after running command.'
+                        # Strip the marker before returning on timeout.
+                        out = out.replace(f'\n{marker}\n', '\n').replace(marker, '')
+                    return (out + '\n[!] Timed out waiting for shell prompt '
+                            'after running command.')
 
                 received_data = receive_data(self.shell, timeout=2.0)
                 if received_data != '':
@@ -345,13 +395,10 @@ class RemoteShell():
                     out = f'{out}\nmeterpreter >'
                     break
 
-        if not self.msfshell:
-            pass
-        else:
-            if '^J' in out:
-                out = '\n'.join(out.split('^J')[1:])
-            else:
-                out = '\n'.join(out.split('\n')[1:])
+        if self.msfshell:
+            # Drop the echoed command line, keeping only the session output.
+            separator = '^J' if '^J' in out else '\n'
+            out = '\n'.join(out.split(separator)[1:])
 
         # Strip the completion marker and its surrounding newlines
         if marker is not None and marker in out:

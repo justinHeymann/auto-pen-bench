@@ -1,26 +1,24 @@
-import paramiko
-import paramiko.ssh_exception
-import socket
-from pydantic import BaseModel
-from pydantic import Field
 import time
 
+import paramiko
+import paramiko.ssh_exception
+from pydantic import BaseModel, Field
 
 SSH_TIMEOUT_SECONDS = 10.0
 
 
 def wait_for_message(shell: paramiko.Channel,
                      timeout: float = SSH_TIMEOUT_SECONDS):
-    """Waits for a specific prompt message indicating that the shell is ready 
+    """Waits for a specific prompt message indicating that the shell is ready
     for user input.
 
     Args:
-        shell (paramiko.Channel): The active shell session from which to 
+        shell (paramiko.Channel): The active shell session from which to
         receive the output.
         timeout (float): Maximum time to keep waiting before giving up.
 
     Returns:
-        str: The accumulated output from the shell session as a string until a 
+        str: The accumulated output from the shell session as a string until a
         valid prompt is detected.
     """
     shell.settimeout(1.0)
@@ -32,9 +30,9 @@ def wait_for_message(shell: paramiko.Channel,
             chunk = shell.recv(9999)
             if chunk:
                 out += chunk.decode('utf-8', errors='ignore')
-        except socket.timeout:
+        except TimeoutError:
             pass
-        except (socket.error, OSError, EOFError):
+        except (OSError, EOFError):
             break
 
         last_line = out.split('\n')[-1] if out else ''
@@ -61,11 +59,11 @@ class SSHConnect(BaseModel):
         """Opens an SSH tunnel from the Kali machine to the remote machine.
 
         Args:
-            ssh_kali (paramiko.SSHClient): SSHClient connected to the Kali 
+            ssh_kali (paramiko.SSHClient): SSHClient connected to the Kali
             machine.
 
         Returns:
-            paramiko.Channel or str: The channel created for the tunnel if 
+            paramiko.Channel or str: The channel created for the tunnel if
             successful, or an error message if not.
         """
         ssh_kali_transport = ssh_kali.get_transport()
@@ -88,11 +86,11 @@ class SSHConnect(BaseModel):
             return f'No SSH service active at {self.ssh_ipaddr}:{self.ssh_port}'
 
     def _connect_to_remote(self, ssh_kali: paramiko.SSHClient):
-        """Establishes a connection to the remote server through the Kali 
+        """Establishes a connection to the remote server through the Kali
         machine.
 
         Args:
-            ssh_kali (paramiko.SSHClient): SSHClient connected to the Kali 
+            ssh_kali (paramiko.SSHClient): SSHClient connected to the Kali
             machine.
 
         Returns:
@@ -107,7 +105,7 @@ class SSHConnect(BaseModel):
         tunnel = self._open_kali_tunnel(ssh_kali)
 
         # If tunnel setup fails, return the error message
-        if type(tunnel) == str:
+        if isinstance(tunnel, str):
             return None, tunnel
 
         try:
@@ -135,7 +133,7 @@ class SSHConnect(BaseModel):
         """Executes the SSH connection and returns the result.
 
         Args:
-            ssh_kali (paramiko.SSHClient): SSHClient connected to the Kali 
+            ssh_kali (paramiko.SSHClient): SSHClient connected to the Kali
             machine.
 
         Returns:
