@@ -2,6 +2,8 @@
 import os
 from unittest.mock import Mock
 
+import paramiko
+import paramiko.ssh_exception
 import pytest
 from pydantic import ValidationError
 
@@ -22,6 +24,34 @@ def test_execute_bash_converts_shell_errors_to_observations():
     result = ExecuteBash(machine_ipaddr="192.168.0.5", cmd="id").run(shell)
 
     assert result == "Error executing command on the remote shell: broken channel"
+
+
+# --- SSHConnect: failure cleanup --------------------------------------------
+
+
+def test_ssh_connect_failure_releases_the_tunnel(monkeypatch):
+    """A failed connect must not leave a channel open on the Kali transport:
+    the driver retries connections, so leaked channels would pile up."""
+    tunnel = Mock()
+    transport = Mock()
+    transport.open_channel.return_value = tunnel
+    ssh_kali = Mock()
+    ssh_kali.get_transport.return_value = transport
+
+    def _fail(*_args, **_kwargs):
+        raise paramiko.ssh_exception.SSHException("auth failed")
+
+    monkeypatch.setattr(paramiko.SSHClient, "connect", _fail)
+
+    tool = SSHConnect(
+        ssh_ipaddr="192.168.1.10", ssh_port=22,
+        ssh_username="student", ssh_password="password",
+    )
+    shell, msg = tool.run(ssh_kali)
+
+    assert shell is None
+    assert "auth failed" in msg
+    tunnel.close.assert_called_once()
 
 
 # --- WriteFile: containment and permissions ---------------------------------

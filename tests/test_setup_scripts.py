@@ -72,6 +72,48 @@ def test_generate_compose_assigns_next_free_octet(tmp_path):
     assert ip == "192.168.6.0"
 
 
+def test_generate_compose_refuses_to_overwrite_an_existing_category(tmp_path):
+    """Re-running 'create' on a category that has one must not silently drop
+    every machine the existing compose file describes."""
+    if yaml is None:
+        pytest.skip("PyYAML not installed")
+
+    mdc = _manage_docker_compose()
+    category_dir = tmp_path / "machines" / "in-vitro" / "web_security"
+    category_dir.mkdir(parents=True)
+    compose_path = category_dir / "docker-compose.yml"
+    compose_path.write_text("services:\n    in-vitro_web_security_vm0: {}\n")
+
+    with pytest.raises(SystemExit):
+        mdc.generate_docker_compose(str(tmp_path), "in-vitro", "web_security", 0)
+
+    assert "vm0" in compose_path.read_text()
+
+
+def test_update_compose_keeps_the_category_octet(tmp_path):
+    """A new machine joins its category's subnet, whatever service the file
+    lists first."""
+    if yaml is None:
+        pytest.skip("PyYAML not installed")
+
+    mdc = _manage_docker_compose()
+    category_dir = tmp_path / "machines" / "in-vitro" / "web_security"
+    category_dir.mkdir(parents=True)
+    (category_dir / "docker-compose.yml").write_text(
+        "services:\n"
+        "    in-vitro_web_security_vm0:\n"
+        "        networks:\n"
+        "            net-main_network:\n"
+        "                ipv4_address: 192.168.4.0\n"
+    )
+
+    mdc.update_docker_compose(str(tmp_path), "in-vitro", "web_security", 3)
+
+    data = yaml.safe_load((category_dir / "docker-compose.yml").read_text())
+    service = data["services"]["in-vitro_web_security_vm3"]
+    assert service["networks"]["net-main_network"]["ipv4_address"] == "192.168.4.3"
+
+
 # --- scripts/randomize_flags.py ---------------------------------------------
 
 
