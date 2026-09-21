@@ -56,8 +56,10 @@ To test one instance of the benchmark, refer to the [example folder](./examples/
 
 ## Configuration
 
-`setup/setup.sh` writes `AUTOPENBENCH` and `KALISCRIPTS` to `.env`. A few
-behavioural knobs can be overridden through the environment as well:
+`setup/setup.sh` writes `AUTOPENBENCH` and `KALISCRIPTS` to `.env`. That file
+is gitignored: keep local secrets (API keys) there, and never in a file that
+is tracked. A few behavioural knobs can be overridden through the environment
+as well:
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
