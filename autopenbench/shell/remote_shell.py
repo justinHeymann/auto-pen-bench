@@ -89,21 +89,31 @@ _ESCAPE_SEQUENCES = re.compile(
     r'|\x1b[@-Z\\-_]'                       # two-character escapes
 )
 _RUNS_OF_CR = re.compile(r'\r+\n')
+# Where the PTY wraps a line, the last character of the wrapped line is echoed
+# again at the start of the next one, separated by the bare CR that resets the
+# cursor (`.../tmp/\r/pass.txt`, `h\rhexdump`). Left alone, that duplicate
+# lands inside whatever text straddles the wrap -- including the completion
+# marker, which then never matches and makes a finished command look like an
+# interactive prompt.
+_WRAPPED_ECHO = re.compile(r'([^\r\n])\r\1')
 
 
 def normalize_newlines(text: str) -> str:
     """Normalises the line endings of a PTY into plain LF.
 
-    CRLF runs become a single LF, and the stray carriage returns the shell
-    integration hooks emit to reset the cursor are dropped.
+    CRLF runs become a single LF, the duplicated character a wrap inserts into
+    the echo is collapsed, and the stray carriage returns the shell integration
+    hooks emit to reset the cursor are dropped.
 
     Args:
         text (str): Raw data received from the shell.
 
     Returns:
-        str: The same text with LF endings and without stray CRs.
+        str: The same text with LF endings, without stray CRs and without the
+            character a line-wrap echo duplicates.
     """
-    return _RUNS_OF_CR.sub('\n', text).replace('\r', '')
+    repaired = _WRAPPED_ECHO.sub(r'\1', text)
+    return _RUNS_OF_CR.sub('\n', repaired).replace('\r', '')
 
 
 def clean_output(text: str) -> str:
@@ -167,6 +177,11 @@ def _looks_like_interactive_prompt(last_line: str) -> bool:
     that legitimately end a command's output.
     """
     if not last_line:
+        return False
+    if last_line == '>':
+        # bash's PS2 prompt, i.e. a continuation line of a multi-line command
+        # (here-document body, quoted string). It means the command is still
+        # being parsed, not that a program is waiting for input.
         return False
     if last_line[-1] in ('?', '$', '#'):
         return True
@@ -418,7 +433,11 @@ class RemoteShell:
         else:
             # Handle non-sudo commands
             last_line = ' '
-            retries = 0
+            stuck_polls = 0
+            # Whether the previous poll came back empty. A command that keeps
+            # producing output is not waiting for input, so only silent polls
+            # count towards the stuck-command heuristic below.
+            quiet = out == ''
             while True:
                 # A CRLF split across two reads would only be joined by
                 # normalising the buffer as a whole.
@@ -452,13 +471,24 @@ class RemoteShell:
                         last_line[-1] == '$' or last_line[-1] == '#'))
                 ):
                     break
-                if _looks_like_interactive_prompt(last_line):
-                    retries += 1
+                # A command that is still producing output is not waiting for
+                # input, however many prompt-looking lines its output contains:
+                # a multi-line send echoes bash's `> ` continuation prompt, a
+                # finished command is followed by the shell prompt, and a scan
+                # report can end in `host:`-shaped lines. Counting those as
+                # evidence of an interactive prompt used to interrupt commands
+                # that had already finished (their full output was in the
+                # observation, followed by a Ctrl+C). Only a shell that has gone
+                # *quiet* with a prompt-like last line is actually stuck.
+                if quiet and _looks_like_interactive_prompt(last_line):
+                    stuck_polls += 1
+                elif not quiet:
+                    stuck_polls = 0
 
                 if 'What do you want to do about modified configuration '\
                         'file sshd_config?' in text:
                     break
-                if retries == 3:
+                if stuck_polls >= 3:
                     # A marker-carrying command cannot be answered
                     # interactively: the harness already typed the
                     # completion marker, which an interactive program
@@ -496,7 +526,8 @@ class RemoteShell:
                             'after running command.')
 
                 received_data = receive_data(self.shell, timeout=2.0)
-                if received_data != '':
+                quiet = received_data == ''
+                if not quiet:
                     out = out + received_data
 
                 if self.msfshell:
