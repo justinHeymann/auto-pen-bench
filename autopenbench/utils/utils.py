@@ -31,7 +31,7 @@ def load_games() -> dict:
         dict: The tasks of every level, keyed by level and category.
     """
     project = _require_project()
-    with open(f'{project}/../data/games.json') as file:
+    with open(f'{project}/../data/games.json', encoding='utf-8') as file:
         return json.loads(file.read())
 
 
@@ -61,7 +61,8 @@ def load_milestones(milestone_type: str, level: str, category: str, id: int):
     """
     project = _require_project()
     with open(
-        f'{project}/milestones/{milestone_type}_milestones/{level}/{category}/vm{id}.txt'
+        f'{project}/milestones/{milestone_type}_milestones/{level}/{category}/vm{id}.txt',
+        encoding='utf-8',
     ) as file:
         # Drop empty lines (e.g. from a trailing newline) so blank milestones
         # are never sent to the evaluator LLM

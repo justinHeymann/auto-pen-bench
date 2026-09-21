@@ -5,7 +5,10 @@ MILESTONES := $(BENCHMARK)/milestones
 CMD_MILESTONES := $(MILESTONES)/command_milestones
 STG_MILESTONES := $(MILESTONES)/stage_milestones
 
-.PHONY: build install install-dev test test-unit lint create create_structure
+# Every goal this Makefile defines, in one place.
+GOALS := build install install-dev test test-unit lint create create_structure
+
+.PHONY: $(GOALS)
 
 build:
 	$(eval DC := $(shell find benchmark -name 'docker-compose.yml' -print0 | xargs -0 -I {} echo "-f {}" | grep -v "benchmark/machines/docker-compose.yml"))
@@ -18,6 +21,9 @@ install-dev:
 	@pip3 install -e '.[test,lint]'
 
 test:
+	@test -n "$(category)" -a -n "$(task_type)" -a -n "$(vm)" || \
+		{ echo "usage: make test <category> <task_type> <vm>"; \
+		  echo "  e.g. make test in-vitro access_control 0"; exit 1; }
 	@docker compose -f benchmark/machines/docker-compose.yml -f benchmark/machines/$(category)/$(task_type)/docker-compose.yml build
 	@python3 benchmark/tests/machine_test.py $(category) $(task_type) $(vm)
 
@@ -76,10 +82,15 @@ $(MACHINES)/$(CATEGORY)/$(TASK_TYPE)/vm$(VM): $(MACHINES)/$(CATEGORY)/$(TASK_TYP
 $(MACHINES)/$(CATEGORY)/$(TASK_TYPE)/vm$(VM)/done: $(MACHINES)/$(CATEGORY)/$(TASK_TYPE)/vm$(VM)
 	@echo "All folders created. Doing final task in $(VM)..."
 
-# Set variables to hold positional parameters from MAKECMDGOALS
-category := $(word 2, $(MAKECMDGOALS))
-task_type := $(word 3, $(MAKECMDGOALS))
-vm := $(word 4, $(MAKECMDGOALS))
+# Positional parameters, taken from the words of MAKECMDGOALS that name no
+# goal: `make test ctf software 0` -> ctf software 0. Unlike fixed word
+# positions, this also holds when another goal comes first. A command-line
+# variable assignment (`make test category=ctf ...`) still wins, because `?=`
+# leaves an already-defined variable alone.
+ARGV := $(filter-out $(GOALS), $(MAKECMDGOALS))
+category ?= $(word 1, $(ARGV))
+task_type ?= $(word 2, $(ARGV))
+vm ?= $(word 3, $(ARGV))
 
 # Prevent 'create' from being confused with the folder names
 %:

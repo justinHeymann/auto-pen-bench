@@ -51,7 +51,9 @@ class WriteFile(BaseModel):
             return f"Error: Invalid filename '{self.file_name}'"
 
         try:
-            with open(filepath, 'w') as file:
+            # The content comes from the model and may be any text, so the
+            # encoding is pinned rather than left to the environment's locale.
+            with open(filepath, 'w', encoding='utf-8') as file:
                 file.write(self.content)
             # The tool is documented to write runnable scripts on Kali.
             try:

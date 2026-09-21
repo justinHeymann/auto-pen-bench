@@ -14,7 +14,7 @@ GAMES_PATH = Path(__file__).resolve().parent.parent / 'data' / 'games.json'
 def update_data(category, task_type, machine_id):
     # Read existing data
     try:
-        with open(GAMES_PATH) as file:
+        with open(GAMES_PATH, encoding='utf-8') as file:
             data = json.load(file)
     except (FileNotFoundError, json.JSONDecodeError):
         data = {}
@@ -40,7 +40,7 @@ def update_data(category, task_type, machine_id):
         entries.append(obj)
 
     # Write with consistent formatting (space after colon, indent=2)
-    with open(GAMES_PATH, 'w') as file:
+    with open(GAMES_PATH, 'w', encoding='utf-8') as file:
         json.dump(data, file, indent=2)
 
 

@@ -5,16 +5,23 @@ from glob import glob
 
 import yaml
 
-# Empty docker-compose
-default = {
-    'version': '3',
-    'networks': {
-        'net-main_network': {
-            'internal': True,
-            'ipam': {'config': [{'subnet': '192.168.0.0/16'}]},
+
+def empty_compose() -> dict:
+    """A fresh skeleton for a category's docker-compose file.
+
+    Built on every call: a module-level dict that ``generate_docker_compose``
+    mutated would carry one call's service into the next file if the module
+    were used twice in the same process. The obsolete top-level ``version``
+    key is not written -- Compose v2 warns that it is ignored.
+    """
+    return {
+        'networks': {
+            'net-main_network': {
+                'internal': True,
+                'ipam': {'config': [{'subnet': '192.168.0.0/16'}]},
+            },
         },
-    },
-}
+    }
 
 # Addresses look like `ipv4_address: 192.168.3.5`: the third octet identifies
 # the category, the fourth the machine inside it.
@@ -30,7 +37,7 @@ def next_free_octet(benchmark):
     """
     in_use = set()
     for compose_file in glob(f'{benchmark}/machines/*/*/docker-compose.yml'):
-        with open(compose_file) as file:
+        with open(compose_file, encoding='utf-8') as file:
             in_use.update(
                 int(octet) for octet in IPV4_RE.findall(file.read())
             )
@@ -74,18 +81,18 @@ def generate_docker_compose(benchmark, category, task_type, machine_id):
     service_name, service = create_service(
         category, task_type, machine_id, oct_3, machine_id)
 
-    # Assign the new service
-    default['services'] = {service_name: service}
+    compose_data = empty_compose()
+    compose_data['services'] = {service_name: service}
 
-    with open(compose_path, 'w') as file:
-        yaml.dump(default, file, default_flow_style=False)
+    with open(compose_path, 'w', encoding='utf-8') as file:
+        yaml.dump(compose_data, file, default_flow_style=False)
 
 
 def update_docker_compose(benchmark, category, task_type, machine_id):
     machine_id = int(machine_id)
     compose_path = os.path.join(
         benchmark, 'machines', category, task_type, 'docker-compose.yml')
-    with open(compose_path) as file:
+    with open(compose_path, encoding='utf-8') as file:
         raw = file.read()
     compose_data = yaml.safe_load(raw)
     # The category's third octet comes from the addresses already in the
@@ -104,7 +111,7 @@ def update_docker_compose(benchmark, category, task_type, machine_id):
     # Assign the new service
     compose_data['services'][service_name] = service
 
-    with open(compose_path, 'w') as file:
+    with open(compose_path, 'w', encoding='utf-8') as file:
         yaml.dump(compose_data, file, default_flow_style=False)
 
 

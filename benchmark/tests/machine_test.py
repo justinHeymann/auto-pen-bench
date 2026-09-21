@@ -2,6 +2,7 @@ import ast
 import re
 import sys
 import time
+from pathlib import Path
 
 from termcolor import cprint
 
@@ -9,7 +10,9 @@ from autopenbench.driver import PentestDriver
 from autopenbench.tools import ExecuteBash, FinalAnswer, SSHConnect, WriteFile
 from autopenbench.utils import load_data
 
-INVITRO = 'benchmark/machines/in-vitro'
+# Absolute, so the script also runs from outside the repository root.
+REPO_ROOT = Path(__file__).resolve().parents[2]
+INVITRO = REPO_ROOT / 'benchmark' / 'machines' / 'in-vitro'
 
 # A solution line is an expression that builds one of the benchmark's tool
 # objects. Only those classes (plus the dynamically extracted ``fname``) are
@@ -44,17 +47,17 @@ def extract_content(target: str, cmd: str = ''):
         match = re.search(pattern, cmd)
         content = match.group(1) if match else None
     elif target == 'in-vitro_network_security_vm4':
-        with open(f'{INVITRO}/network_security/vm4/solution.py') as file:
-            content = file.read()
+        content = (INVITRO / 'network_security/vm4/solution.py').read_text(
+            encoding='utf-8')
     elif target == 'in-vitro_network_security_vm5':
-        with open(f'{INVITRO}/network_security/vm5a/solution.py') as file:
-            content = file.read()
+        content = (INVITRO / 'network_security/vm5a/solution.py').read_text(
+            encoding='utf-8')
     elif target == 'in-vitro_cryptography_vm2':
-        with open(f'{INVITRO}/cryptography/vm2/solution.py') as file:
-            content = file.read()
+        content = (INVITRO / 'cryptography/vm2/solution.py').read_text(
+            encoding='utf-8')
     elif target == 'in-vitro_cryptography_vm3':
-        with open(f'{INVITRO}/cryptography/vm3/solution.py') as file:
-            content = file.read()
+        content = (INVITRO / 'cryptography/vm3/solution.py').read_text(
+            encoding='utf-8')
     return content
 
 
@@ -82,13 +85,24 @@ if len(sys.argv) != 4:
 LEVEL = sys.argv[1]  # in-vitro or real-world
 CATEGORY = sys.argv[2]  # task category
 GAME_ID = int(sys.argv[3])  # vm identifier
-SOLUTIONS = f'benchmark/solutions/{LEVEL}/{CATEGORY}'  # Solutions path
+SOLUTIONS = REPO_ROOT / 'benchmark' / 'solutions' / LEVEL / CATEGORY
 
-# Load the vulnerable machine to test
-game = load_data(LEVEL)[CATEGORY][GAME_ID]
+# Load the vulnerable machine to test. Looked up by `target` rather than by
+# list position: `data/games.json` is hand-edited and appended to by
+# `make create`, so an inserted entry would otherwise silently run a
+# different game than the one this vm number names.
+TARGET = f'{LEVEL}_{CATEGORY}_vm{GAME_ID}'
+try:
+    game = next(
+        entry for entry in load_data(LEVEL)[CATEGORY]
+        if entry.get('target') == TARGET
+    )
+except StopIteration:
+    print(f"No entry with target '{TARGET}' in data/games.json")
+    sys.exit(1)
 
 # Load solutions
-with open(f'{SOLUTIONS}/vm{GAME_ID}.txt') as file:
+with open(SOLUTIONS / f'vm{GAME_ID}.txt', encoding='utf-8') as file:
     solutions = file.readlines()
 
 # Initialize the driver and reset

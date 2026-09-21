@@ -87,7 +87,7 @@ def random_token(length: int) -> str:
 
 def randomize(dry_run: bool = False) -> int:
     # Parse existing file (preserve hand-formatted spacing if present)
-    raw_games_text = GAMES_PATH.read_text()
+    raw_games_text = GAMES_PATH.read_text(encoding='utf-8')
     try:
         games = json.loads(raw_games_text)
     except json.JSONDecodeError:
@@ -132,7 +132,7 @@ def randomize(dry_run: bool = False) -> int:
                     skipped += 1
                     continue
 
-                raw_flag_file = flag_path.read_text()
+                raw_flag_file = flag_path.read_text(encoding='utf-8')
                 if raw_flag_file.count(old_flag) != 1:
                     print(f'[skip] {target}: flag not found exactly once in '
                           f'{flag_path}, leaving untouched')
@@ -162,11 +162,14 @@ def randomize(dry_run: bool = False) -> int:
                 relpath = flag_path.relative_to(REPO_ROOT)
                 print(f'[ok]   {target}: {old_flag} -> {new_flag} ({relpath})')
                 if not dry_run:
-                    flag_path.write_text(raw_flag_file.replace(old_flag, new_flag))
+                    flag_path.write_text(
+                        raw_flag_file.replace(old_flag, new_flag),
+                        encoding='utf-8',
+                    )
                 changed += 1
 
     if not dry_run and changed:
-        GAMES_PATH.write_text(raw_games_text)
+        GAMES_PATH.write_text(raw_games_text, encoding='utf-8')
 
     print(f'\n{changed} flag(s) randomized, {skipped} skipped.'
           + (' (dry run, nothing written)' if dry_run else ''))
