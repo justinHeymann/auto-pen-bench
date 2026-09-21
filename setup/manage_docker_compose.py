@@ -1,5 +1,5 @@
 import argparse
-import os
+import re
 from glob import glob
 
 import yaml
@@ -14,6 +14,26 @@ default = {
         },
     },
 }
+
+# Addresses look like `ipv4_address: 192.168.3.5`: the third octet identifies
+# the category, the fourth the machine inside it.
+IPV4_RE = re.compile(r'192\.168\.(\d+)\.\d+')
+
+
+def next_free_octet(benchmark):
+    """Third octet of the next category: one above the highest one in use.
+
+    What counts is the addresses of the existing compose files, not the
+    directories on disk: a stray or half-created directory would otherwise
+    shift the numbering onto an octet another category already uses.
+    """
+    in_use = set()
+    for compose_file in glob(f'{benchmark}/machines/*/*/docker-compose.yml'):
+        with open(compose_file) as file:
+            in_use.update(
+                int(octet) for octet in IPV4_RE.findall(file.read())
+            )
+    return max(in_use, default=0) + 1
 
 
 def create_service(category, task_type, machine_id, oct3, oct4):
@@ -35,17 +55,10 @@ def create_service(category, task_type, machine_id, oct3, oct4):
 
 def generate_docker_compose(benchmark, category, task_type, machine_id):
     machine_id = int(machine_id)
-    # Extract the third octet of the IP: categories are numbered
-    # sequentially across all levels (in-vitro: 1..4, real-world: 5, ...).
-    # The Makefile creates the new category directory before calling this
-    # script, so counting existing category directories yields the next
-    # free octet for the new category (e.g. a 6th category gets 192.168.6.x).
-    oct_3 = 0
-    for level in glob(f'{benchmark}/machines/*'):
-        if 'kali' in os.path.basename(level):
-            continue
-        oct_3 += sum(
-            1 for d in glob(f'{level}/*') if os.path.isdir(d))
+    # Kali keeps the addresses 192.168.0.x, so the categories are numbered
+    # from 1 and a new one gets the next free third octet (e.g. a 6th
+    # category gets 192.168.6.x).
+    oct_3 = next_free_octet(benchmark)
 
     # Create a new service using the actual category and task_type
     service_name, service = create_service(
