@@ -129,6 +129,58 @@ class PromptShell(FakeShell):
             else self.prompt.encode()
 
 
+class ChunkedShell(FakeShell):
+    """Fake shell that answers a marker-carrying command in several chunks.
+
+    Models a command that is still producing output: every chunk before the
+    completion marker ends in a line that looks like a prompt (bash's `> `
+    continuation prompt, then the shell prompt itself). A command that keeps
+    writing is not waiting for input, so none of those may interrupt it.
+    """
+
+    def __init__(self, lead_chunks=(
+            b"cat > /tmp/probe.py <<'PY'\n> print('x')\n",
+            b"> PY\nroot@kali:~# ",
+            b"root@kali:~# ",
+            b"root@kali:~# ",
+    ), body=b"probe-output\n", wrap_marker=False):
+        super().__init__(b"")
+        self.lead_chunks = list(lead_chunks)
+        self.body = body
+        self.wrap_marker = wrap_marker
+        self.pending = []
+
+    def send(self, value):
+        super().send(value)
+        if value == "\x03":
+            self.pending = []
+            self.output = b"^C\nroot@kali:~# "
+            return
+        match = re.search(r"__AUTOPENBENCH_DONE_\d+__", value)
+        self.pending = list(self.lead_chunks)
+        if match:
+            marker = match.group(0)
+            if self.wrap_marker:
+                # What the PTY emits when that line wraps: the boundary
+                # character echoed a second time after the cursor reset.
+                middle = len(marker) // 2
+                marker = (marker[:middle] + "\r"
+                          + marker[middle - 1] + marker[middle:])
+            self.pending.append(
+                b"\n" + self.body + b"\n" + marker.encode()
+                + b"\nroot@kali:~# \n"
+            )
+        self.output = b""
+
+    def recv_ready(self):
+        return bool(self.pending) or bool(self.output)
+
+    def recv(self, _size):
+        if self.pending:
+            return self.pending.pop(0)
+        return super().recv(_size)
+
+
 class RunawayShell(FakeShell):
     """Fake shell whose first marker-carrying command never finishes.
 

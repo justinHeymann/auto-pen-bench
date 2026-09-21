@@ -7,9 +7,14 @@ from unittest.mock import Mock
 import pytest
 
 from autopenbench.shell import remote_shell as remote_shell_mod
-from autopenbench.shell.remote_shell import RemoteShell, receive_data
+from autopenbench.shell.remote_shell import (
+    RemoteShell,
+    normalize_newlines,
+    receive_data,
+)
 from autopenbench.tools import wait_for_message
 from support import (
+    ChunkedShell,
     EchoingShell,
     FakeShell,
     MarkerShell,
@@ -102,6 +107,40 @@ def test_execute_cmd_drains_stale_output_before_running_command():
 
     assert "fresh output" in out
     assert "stale-leftover" not in out
+
+
+def test_execute_cmd_does_not_interrupt_a_command_that_is_still_printing():
+    """A command that keeps producing output is not waiting for input.
+
+    The shipped incident: a multi-line send echoes bash's `> ` continuation
+    prompt and then the shell prompt, so three prompt-looking lines appeared
+    before the completion marker. They were counted as evidence of an
+    interactive prompt and the already-finished command was interrupted -- the
+    full result was in the observation, followed by a Ctrl+C.
+    """
+    shell = ChunkedShell()
+
+    out = RemoteShell(shell).execute_cmd("cat > /tmp/probe.py <<'PY'\nPY")
+
+    assert "probe-output" in out
+    assert "interrupted" not in out
+    assert "\x03" not in shell.sent
+
+
+def test_execute_cmd_recognises_a_marker_split_by_a_line_wrap():
+    """The completion marker must survive a PTY line wrap.
+
+    Where the echo wraps, the boundary character is emitted twice around a
+    cursor-reset CR. The literal marker then never appears in the raw capture,
+    which used to make a finished command look like an interactive prompt.
+    """
+    shell = ChunkedShell(wrap_marker=True)
+
+    out = RemoteShell(shell).execute_cmd("id")
+
+    assert "probe-output" in out
+    assert "interrupted" not in out
+    assert "AUTOPENBENCH_DONE" not in out
 
 
 def test_execute_cmd_times_out_when_marker_never_arrives(monkeypatch):
@@ -296,6 +335,22 @@ def test_remote_shell_close_releases_the_channel_and_its_transport():
 
 
 # --- Output cleaning and the receive helpers --------------------------------
+
+
+def test_normalize_newlines_repairs_the_duplicated_wrap_character():
+    """A wrap echoes the boundary character twice around a cursor-reset CR.
+
+    ``/tmp/\r/pass.txt`` is the shell's echo of ``/tmp/pass.txt``, not a
+    doubled slash; leaving it in hands the agent a command line it never sent
+    (and can break the completion marker that straddles the wrap).
+    """
+    assert normalize_newlines("ls /tmp/\r/pass.txt") == "ls /tmp/pass.txt"
+    assert normalize_newlines("h\rhexdump -C") == "hexdump -C"
+    assert normalize_newlines("xxd -p\rp") == "xxd -p"
+    assert normalize_newlines("grep -\r-oP x") == "grep -oP x"
+    # Real CRLF line endings and blank lines stay intact.
+    assert normalize_newlines("a\r\nb\r\nc") == "a\nb\nc"
+    assert normalize_newlines("a\n\r\nb") == "a\n\nb"
 
 
 def test_clean_output_strips_escapes_and_normalises_line_endings():

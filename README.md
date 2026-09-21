@@ -76,6 +76,14 @@ make test-unit
 make lint
 ```
 
+The unit tests mostly drive `RemoteShell` through the fake channels in
+`tests/support.py`, which answer with canned bytes. `tests/test_remote_shell_pty.py`
+additionally runs the shell against a real `bash` on a POSIX PTY: that is the
+only way to pin how the completion protocol behaves around a here-document
+(PS2 `> ` continuation prompt, then the regular prompt) and around a command
+line long enough for the terminal to wrap its echo. It needs neither docker
+nor an API key, and is skipped where no PTY/bash is available.
+
 
 ## How to Test and Evaluate an Agent
 
