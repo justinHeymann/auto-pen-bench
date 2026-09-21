@@ -1,6 +1,7 @@
 import argparse
 import sys
 
+import anyio
 from mcp import types
 from pydantic import Field
 
@@ -67,16 +68,24 @@ def create_mcp_server(task: str, flag: str, target: str) -> MCPServer:
         except Exception as e:
             return f"{error_label}: {e!s}", False
 
+    # driver.step() blocks (docker subprocess calls, socket reads of up to
+    # the command timeout), so tools run it in a worker thread to keep the
+    # event loop responsive. The lock serializes steps because the driver is
+    # stateful (one shared shell per remote).
+    step_lock = anyio.Lock()
+
     @mcp.tool(description="Execute a shell command on a machine")
     async def execute_bash(
         machine_ipaddr: str = Field(..., description="IP address of the target machine"),
         cmd: str = Field(..., description="Bash command to execute")
     ) -> list[types.TextContent]:
         """Execute a shell command on a machine."""
-        out, _ = run_step(
-            ExecuteBash(machine_ipaddr=machine_ipaddr, cmd=cmd),
-            "Error executing command",
-        )
+        async with step_lock:
+            out, _ = await anyio.to_thread.run_sync(
+                run_step,
+                ExecuteBash(machine_ipaddr=machine_ipaddr, cmd=cmd),
+                "Error executing command",
+            )
         return _text(out)
 
     @mcp.tool(description="Establish SSH connection to a remote machine")
@@ -87,15 +96,17 @@ def create_mcp_server(task: str, flag: str, target: str) -> MCPServer:
         ssh_password: str = Field(..., description="SSH password")
     ) -> list[types.TextContent]:
         """Start an SSH session into the target machine"""
-        out, _ = run_step(
-            SSHConnect(
-                ssh_ipaddr=ssh_ipaddr,
-                ssh_port=ssh_port,
-                ssh_username=ssh_username,
-                ssh_password=ssh_password
-            ),
-            "SSH connection failed",
-        )
+        async with step_lock:
+            out, _ = await anyio.to_thread.run_sync(
+                run_step,
+                SSHConnect(
+                    ssh_ipaddr=ssh_ipaddr,
+                    ssh_port=ssh_port,
+                    ssh_username=ssh_username,
+                    ssh_password=ssh_password
+                ),
+                "SSH connection failed",
+            )
         return _text(out)
 
     @mcp.tool(description="Submit the final answer flag")
@@ -104,7 +115,9 @@ def create_mcp_server(task: str, flag: str, target: str) -> MCPServer:
     ) -> list[types.TextContent]:
         """Provide the final flag of the CTF game. The flag is validated
         against the real one and the result reported to the agent."""
-        out, done = run_step(FinalAnswer(flag=flag), "Error submitting flag")
+        async with step_lock:
+            out, done = await anyio.to_thread.run_sync(
+                run_step, FinalAnswer(flag=flag), "Error submitting flag")
         if done:
             out += "\nThe pentest is complete."
         return _text(out)
@@ -116,10 +129,12 @@ def create_mcp_server(task: str, flag: str, target: str) -> MCPServer:
     ) -> list[types.TextContent]:
         """Write a script or a text into a file. The file will be located in
         the /root/scripts folder of Kali machine."""
-        out, _ = run_step(
-            WriteFile(content=content, file_name=file_name),
-            "Error writing file",
-        )
+        async with step_lock:
+            out, _ = await anyio.to_thread.run_sync(
+                run_step,
+                WriteFile(content=content, file_name=file_name),
+                "Error writing file",
+            )
         return _text(out)
 
     return mcp
