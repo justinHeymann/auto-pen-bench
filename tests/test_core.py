@@ -1,5 +1,7 @@
+import asyncio
 import itertools
 import json
+import os
 import re
 import socket
 from pathlib import Path
@@ -12,6 +14,7 @@ except ImportError:
     yaml = None
 
 import pytest
+from pydantic import ValidationError
 
 from autopenbench.driver import pentest_driver
 from autopenbench.driver.pentest_driver import PentestDriver
@@ -158,9 +161,9 @@ def test_execute_bash_converts_shell_errors_to_observations():
 
 
 def test_tool_models_require_their_inputs():
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         FinalAnswer()
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         SSHConnect(ssh_ipaddr="127.0.0.1", ssh_port=22, ssh_username="root")
 
 
@@ -513,7 +516,7 @@ def test_execute_cmd_reports_when_interrupt_cannot_be_sent():
         def send(self, value):
             super().send(value)
             if value == "\x03":
-                raise socket.error("Socket is closed")
+                raise OSError("Socket is closed")
 
     shell = BrokenShell(output=b"student@192.168.1.0's password: ")
     remote_shell = RemoteShell(shell)
@@ -799,6 +802,7 @@ def test_load_data_missing_category_raises_key_error(tmp_path, monkeypatch):
 
 
 def test_mcp_server_initializes_driver(monkeypatch):
+    pytest.importorskip("mcp")
     from autopenbench.mcp_server import mcp_server as mcp_mod
 
     driver = Mock()
@@ -813,6 +817,7 @@ def test_mcp_server_initializes_driver(monkeypatch):
 
 
 def test_mcp_server_survives_driver_init_failure(monkeypatch):
+    pytest.importorskip("mcp")
     from autopenbench.mcp_server import mcp_server as mcp_mod
 
     monkeypatch.setattr(
@@ -885,3 +890,216 @@ def test_generate_compose_assigns_next_free_octet(tmp_path):
 
     # 5 in-vitro categories (incl. the new one) + 1 real-world = 6
     assert ip == "192.168.6.0"
+
+
+# --- su/sudo marker decision -------------------------------------------------
+
+
+@pytest.mark.parametrize("cmd", ["su -", "su - root", "su root", "su"])
+def test_execute_cmd_sends_no_marker_for_su_variants(cmd, monkeypatch):
+    """Every `su` form must be sent without a completion marker.
+
+    The marker is typed into the password prompt and consumed as the password,
+    so `su -`/`su - root` (which a `cmd[:2] == 'su '` check misses) would hang
+    the shell and desync every later observation.
+    """
+    shell = FakeShell(output=b"Password: ")
+    ticks = itertools.count(0, 10)
+    monkeypatch.setattr(remote_shell_mod.time, "monotonic", lambda: next(ticks))
+
+    RemoteShell(shell).execute_cmd(cmd)
+
+    assert "AUTOPENBENCH_DONE" not in "".join(shell.sent)
+    # The prompt stays alive: the agent answers it with its next command.
+    assert "\x03" not in shell.sent
+
+
+# --- Forbidden network tools ------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "cmd",
+    [
+        "nc -lvnp 4444",
+        "/usr/bin/nc -l",
+        "ncat -l 4444",
+        ";nc -l 4444",
+        "nc.openbsd -l",
+        "socat TCP-LISTEN:4444,fork",
+    ],
+)
+def test_uses_forbidden_net_tool_blocks_variants(cmd):
+    assert remote_shell_mod.uses_forbidden_net_tool(cmd) is True
+
+
+@pytest.mark.parametrize(
+    "cmd",
+    [
+        "echo nc",
+        "ls /usr/bin | grep socat",
+        "which ncat",
+        "nmap -sV 192.168.1.0",
+    ],
+)
+def test_uses_forbidden_net_tool_allows_plain_mentions(cmd):
+    assert remote_shell_mod.uses_forbidden_net_tool(cmd) is False
+
+
+# --- WriteFile containment and permissions ----------------------------------
+
+
+def test_write_file_rejects_symlink_escaping_scripts_directory(tmp_path, monkeypatch):
+    """A symlink inside KALISCRIPTS must not be followed out of it."""
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (scripts / "escape.sh").symlink_to(outside / "target.sh")
+
+    monkeypatch.setattr("autopenbench.tools.write_file.SCRIPTS", str(scripts))
+
+    result = WriteFile(content="pwned", file_name="escape.sh").run()
+
+    assert result.startswith("Error: Invalid filename")
+    assert not (outside / "target.sh").exists()
+
+
+def test_write_file_marks_written_script_executable(tmp_path, monkeypatch):
+    monkeypatch.setattr("autopenbench.tools.write_file.SCRIPTS", str(tmp_path))
+
+    WriteFile(content="#!/bin/sh\n", file_name="run.sh").run()
+
+    assert os.stat(tmp_path / "run.sh").st_mode & 0o111
+
+
+# --- Driver: configurable flag length and scripts-dir validation -------------
+
+
+def test_flag_length_is_configurable(monkeypatch):
+    monkeypatch.delenv("AUTOPENBENCH_FLAG_LENGTH", raising=False)
+    assert pentest_driver.flag_length() == pentest_driver.DEFAULT_FLAG_LENGTH == 16
+
+    monkeypatch.setenv("AUTOPENBENCH_FLAG_LENGTH", "24")
+    assert pentest_driver.flag_length() == 24
+
+    driver = PentestDriver("task", "A" * 24, "target")
+    output, done = driver.step(FinalAnswer(flag="A" * 24 + "-extra"))
+
+    assert output == "You Won!"
+    assert done is True
+
+
+def test_restart_reports_missing_scripts_directory(monkeypatch, tmp_path):
+    project = tmp_path / "project"
+    (project / "machines").mkdir(parents=True)
+    monkeypatch.setattr(pentest_driver, "PROJECT", str(project))
+    monkeypatch.setattr(pentest_driver, "SCRIPTS", str(tmp_path / "nope"))
+
+    with pytest.raises(EnvironmentError, match="KALISCRIPTS directory"):
+        pentest_driver.restart_docker_compose_service("in-vitro_access_control_vm0")
+
+
+# --- Flag randomization: derived flags must be left alone -------------------
+
+
+def _load_randomize_flags():
+    """Load scripts/randomize_flags.py by file path (it is not a package)."""
+    import importlib.util
+    path = Path(__file__).resolve().parent.parent / "scripts" / "randomize_flags.py"
+    spec = importlib.util.spec_from_file_location("randomize_flags", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _randomize_fixture(tmp_path, level, category, vmid, token, extra_files=None):
+    """Build a minimal benchmark tree with one VM and one games.json entry."""
+    machines = tmp_path / "benchmark" / "machines"
+    vm_dir = machines / level / category / vmid
+    vm_dir.mkdir(parents=True)
+    (vm_dir / "flag.txt").write_text(token)
+    for name, body in (extra_files or {}).items():
+        (vm_dir / name).write_text(body)
+
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    games = data_dir / "games.json"
+    games.write_text(json.dumps(
+        {level: {category: [{"target": f"{level}_{category}_{vmid}", "flag": token}]}},
+        indent=2,
+    ))
+    return vm_dir, games, tmp_path, machines
+
+
+def test_randomize_skips_flag_that_appears_in_another_file(tmp_path, monkeypatch):
+    """The Heartbleed VM's flag is a slice of its private key.
+
+    Rewriting only flag.txt/games.json would leave the served key holding the
+    old token, so the entry must be left untouched.
+    """
+    mod = _load_randomize_flags()
+    token = "MIIEvQIBADANBgkq"
+    vm_dir, games, root, machines = _randomize_fixture(
+        tmp_path, "real-world", "cve", "vm0", token,
+        extra_files={"local.key": f"-----BEGIN PRIVATE KEY-----\n{token}xyz\n"},
+    )
+    monkeypatch.setattr(mod, "REPO_ROOT", root)
+    monkeypatch.setattr(mod, "MACHINES_DIR", machines)
+    monkeypatch.setattr(mod, "GAMES_PATH", games)
+
+    assert mod.randomize(dry_run=False) == 0
+    assert (vm_dir / "flag.txt").read_text() == token
+    assert json.loads(games.read_text())["real-world"]["cve"][0]["flag"] == token
+
+
+def test_randomize_regenerates_a_standalone_flag(tmp_path, monkeypatch):
+    mod = _load_randomize_flags()
+    token = "Ey8C7gOdzaKxTNqp"
+    vm_dir, games, root, machines = _randomize_fixture(
+        tmp_path, "in-vitro", "access_control", "vm0", token,
+    )
+    monkeypatch.setattr(mod, "REPO_ROOT", root)
+    monkeypatch.setattr(mod, "MACHINES_DIR", machines)
+    monkeypatch.setattr(mod, "GAMES_PATH", games)
+
+    assert mod.randomize(dry_run=False) == 1
+
+    new_flag = json.loads(games.read_text())["in-vitro"]["access_control"][0]["flag"]
+    assert new_flag != token
+    assert (vm_dir / "flag.txt").read_text() == new_flag
+
+
+# --- MCP server: tools must not raise on driver failure ---------------------
+
+
+def _registered_tool(server, name):
+    """Best-effort lookup of a registered FastMCP tool callable."""
+    manager = getattr(server, "_tool_manager", None)
+    tools = getattr(manager, "_tools", None)
+    if tools and name in tools:
+        return tools[name].fn
+    return None
+
+
+def test_mcp_no_session_helper_reports_error():
+    mcp_mod = pytest.importorskip("autopenbench.mcp_server.mcp_server")
+
+    assert mcp_mod._no_session()[0].text == mcp_mod._NO_SESSION_MESSAGE
+
+
+def test_mcp_tools_report_driver_failures_as_text(monkeypatch):
+    mcp_mod = pytest.importorskip("autopenbench.mcp_server.mcp_server")
+
+    driver = Mock()
+    driver.step.side_effect = RuntimeError("channel exploded")
+    monkeypatch.setattr(mcp_mod, "PentestDriver", Mock(return_value=driver))
+
+    server = mcp_mod.create_mcp_server("task", "flag", "target")
+    tool = _registered_tool(server, "execute_bash")
+    if tool is None:
+        pytest.skip("FastMCP internals not accessible in this version")
+
+    contents = asyncio.run(tool(machine_ipaddr="192.168.0.5", cmd="id"))
+
+    assert "Error executing command" in contents[0].text
+    assert "channel exploded" in contents[0].text
