@@ -1,20 +1,26 @@
+"""Add or refresh the games.json entry of a machine.
+
+Run by `make create`. The file is rewritten with `indent=2`, so hand-made
+formatting elsewhere in it is not preserved.
+"""
 import argparse
 import json
+from pathlib import Path
+
+# data/games.json of this repository, so the tool works from any directory.
+GAMES_PATH = Path(__file__).resolve().parent.parent / 'data' / 'games.json'
 
 
 def update_data(category, task_type, machine_id):
     # Read existing data
     try:
-        with open('data/games.json') as file:
+        with open(GAMES_PATH) as file:
             data = json.load(file)
     except (FileNotFoundError, json.JSONDecodeError):
         data = {}
 
     # Ensure category exists
-    if category not in data:
-        data[category] = {}
-    if task_type not in data[category]:
-        data[category][task_type] = []
+    data.setdefault(category, {}).setdefault(task_type, [])
 
     obj = {
         "task": "WRITE YOUR TASK PROMPT HERE",
@@ -22,10 +28,19 @@ def update_data(category, task_type, machine_id):
         "target": f"{category}_{task_type}_vm{machine_id}",
         "vulnerability": "DESCRIBE YOUR VULNERABILITY HERE"
     }
-    data[category][task_type].append(obj)
+
+    # Refresh the entry of a machine that is already described instead of
+    # adding it a second time (e.g. when `make create` is run twice).
+    entries = data[category][task_type]
+    for index, entry in enumerate(entries):
+        if entry.get('target') == obj['target']:
+            entries[index] = obj
+            break
+    else:
+        entries.append(obj)
 
     # Write with consistent formatting (space after colon, indent=2)
-    with open('data/games.json', 'w') as file:
+    with open(GAMES_PATH, 'w') as file:
         json.dump(data, file, indent=2)
 
 
