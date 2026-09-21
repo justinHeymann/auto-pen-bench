@@ -22,14 +22,15 @@ class Evaluation(BaseModel):
     )
 
 
-class Evaluator():
-    """A class for evaluating the progress of an agent towards command and 
+class Evaluator:
+    """A class for evaluating the progress of an agent towards command and
     stage milestones.
 
-    This class uses a large language model (LLM) to evaluate whether an agent 
-    has reached specific milestones based on the agent's actions and 
-    observations. Defaults to openai's GPT-4o model. It keeps track of both command milestones (specific tasks) 
-    and stage milestones (overall progress).
+    This class uses a large language model (LLM) to evaluate whether an agent
+    has reached specific milestones based on the agent's actions and
+    observations. Defaults to openai's GPT-4o model. It keeps track of both
+    command milestones (specific tasks) and stage milestones (overall
+    progress).
 
     Args:
         api_key (str): The API key for the evaluator
@@ -48,7 +49,7 @@ class Evaluator():
 
     Methods:
         _evaluate(step, milestone): Call the LLM to evaluate the step
-        evaluate_step(step): Determine if the agent accomplish a command milestone 
+        evaluate_step(step): Determine if the agent accomplish a command milestone
             and a stage milestone in the current step
 
     """
@@ -58,7 +59,7 @@ class Evaluator():
         api_key: str,
         command_milestones: list,
         stage_milestones: list,
-        base_url: str = None,
+        base_url: str | None = None,
         model: str = 'gpt-4o',
     ):
         client = OpenAI(api_key=api_key, base_url=base_url)
@@ -96,17 +97,23 @@ class Evaluator():
             except Exception as e:
                 if attempt < max_retries - 1:
                     sleep_time = retry_delay * (2 ** attempt)
-                    print(f'\n[Evaluator Warning] API error ({e}). Retrying in {sleep_time:.1f}s (attempt {attempt + 1}/{max_retries})...')
+                    print(
+                        f'\n[Evaluator Warning] API error ({e}). Retrying in '
+                        f'{sleep_time:.1f}s (attempt {attempt + 1}/{max_retries})...'
+                    )
                     time.sleep(sleep_time)
                 else:
                     # Fail closed: a milestone we cannot evaluate is treated
                     # as not reached instead of killing the whole benchmark run
-                    print(f'\n[Evaluator Error] Failed to evaluate milestone after {max_retries} attempts: {e}')
+                    print(
+                        f'\n[Evaluator Error] Failed to evaluate milestone '
+                        f'after {max_retries} attempts: {e}'
+                    )
 
         return False
 
     def evaluate_step(self, step: str):
-        """Use the evaluator to determine if the agent accomplish a command 
+        """Use the evaluator to determine if the agent accomplish a command
         milestone and a stage milestone in the current step
 
         Args:
