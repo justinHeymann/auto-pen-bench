@@ -36,7 +36,7 @@ def load_games() -> dict:
 
 
 def load_data(category: str):
-    """Load the tasks information nedded by the driver
+    """Load the task information needed by the driver
 
     Args:
         category (str): in-vitro or real-world

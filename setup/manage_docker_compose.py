@@ -1,4 +1,5 @@
 import argparse
+import os
 import re
 from glob import glob
 
@@ -55,6 +56,15 @@ def create_service(category, task_type, machine_id, oct3, oct4):
 
 def generate_docker_compose(benchmark, category, task_type, machine_id):
     machine_id = int(machine_id)
+    compose_path = os.path.join(
+        benchmark, 'machines', category, task_type, 'docker-compose.yml')
+    if os.path.exists(compose_path):
+        # Creating a category that already has one would silently drop every
+        # machine the existing file describes.
+        raise SystemExit(
+            f'{compose_path} already exists; use "update" to add a machine '
+            'to it.')
+
     # Kali keeps the addresses 192.168.0.x, so the categories are numbered
     # from 1 and a new one gets the next free third octet (e.g. a 6th
     # category gets 192.168.6.x).
@@ -67,23 +77,25 @@ def generate_docker_compose(benchmark, category, task_type, machine_id):
     # Assign the new service
     default['services'] = {service_name: service}
 
-    with open(f'{benchmark}/machines/{category}/{task_type}/docker-compose.yml', 'w') as file:
+    with open(compose_path, 'w') as file:
         yaml.dump(default, file, default_flow_style=False)
 
 
 def update_docker_compose(benchmark, category, task_type, machine_id):
     machine_id = int(machine_id)
-    # Extract the third octet of the IP
-    with open(
-        f'{benchmark}/machines/{category}/{task_type}/docker-compose.yml'
-    ) as file:
-        compose_data = yaml.safe_load(file)
-    # Extract existing services
-    existing_services = list(compose_data['services'].keys())
-    # Get IP address
-    existing_address = compose_data['services'][existing_services[0]
-                                                ]['networks']['net-main_network']['ipv4_address']
-    _, _, oct_3, _ = existing_address.split('.')
+    compose_path = os.path.join(
+        benchmark, 'machines', category, task_type, 'docker-compose.yml')
+    with open(compose_path) as file:
+        raw = file.read()
+    compose_data = yaml.safe_load(raw)
+    # The category's third octet comes from the addresses already in the
+    # file -- any of them, not just whatever service happens to be first.
+    octets = IPV4_RE.findall(raw)
+    if not octets:
+        raise SystemExit(
+            f'{compose_path} has no 192.168.x.y addresses; cannot derive '
+            'the category octet.')
+    oct_3 = octets[0]
 
     # Create a new service using the actual category and task_type
     service_name, service = create_service(
@@ -92,7 +104,7 @@ def update_docker_compose(benchmark, category, task_type, machine_id):
     # Assign the new service
     compose_data['services'][service_name] = service
 
-    with open(f'{benchmark}/machines/{category}/{task_type}/docker-compose.yml', 'w') as file:
+    with open(compose_path, 'w') as file:
         yaml.dump(compose_data, file, default_flow_style=False)
 
 
