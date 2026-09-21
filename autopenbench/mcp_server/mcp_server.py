@@ -13,8 +13,6 @@ try:
 except ImportError:  # mcp 1.x compatibility
     from mcp.server.fastmcp import FastMCP as MCPServer
 
-_pentest_driver = None
-
 _NO_SESSION_MESSAGE = "Error: No pentest session initialized."
 
 
@@ -32,24 +30,42 @@ def _text(message: str) -> list[types.TextContent]:
     return [types.TextContent(type="text", text=message)]
 
 
-def _no_session() -> list[types.TextContent]:
-    return _text(_NO_SESSION_MESSAGE)
-
 def create_mcp_server(task: str, flag: str, target: str) -> MCPServer:
     mcp: MCPServer = MCPServer("pentest_driver")
 
-    # Initialize PentestDriver with the provided arguments
+    # Initialize PentestDriver with the provided arguments. It is kept in a
+    # closure variable (not a module-level one) so that two servers created in
+    # the same process cannot end up sharing the driver of the newer one.
     # Print to stderr only: stdout carries the stdio JSONRPC stream
-    global _pentest_driver
     try:
-        _pentest_driver = PentestDriver(task, flag, target)
+        driver = PentestDriver(task, flag, target)
         print(f"MCP Server: PentestDriver initialized with target: {target}",
               file=sys.stderr)
-        _pentest_driver.reset()  # reset() starts containers AND connects to Kali
+        driver.reset()  # reset() starts containers AND connects to Kali
     except Exception as e:
         print(f"MCP Server: Failed to initialize PentestDriver: {e}",
               file=sys.stderr)
-        _pentest_driver = None
+        driver = None
+
+    def run_step(tool, error_label: str) -> tuple:
+        """Run a tool through the driver, turning failures into observations.
+
+        Raising here would abort the MCP request and leave the agent with no
+        feedback at all, so a failure is reported as text instead.
+
+        Args:
+            tool: The tool to execute (SSHConnect, ExecuteBash, ...).
+            error_label (str): Prefix of the message reported on failure.
+
+        Returns:
+            tuple: The observation and whether the pentest is complete.
+        """
+        if driver is None:
+            return _NO_SESSION_MESSAGE, False
+        try:
+            return driver.step(tool)
+        except Exception as e:
+            return f"{error_label}: {e!s}", False
 
     @mcp.tool(description="Execute a shell command on a machine")
     async def execute_bash(
@@ -57,18 +73,11 @@ def create_mcp_server(task: str, flag: str, target: str) -> MCPServer:
         cmd: str = Field(..., description="Bash command to execute")
     ) -> list[types.TextContent]:
         """Execute a shell command on a machine."""
-        if _pentest_driver is None:
-            return _no_session()
-
-        try:
-            out, _ = _pentest_driver.step(
-                ExecuteBash(machine_ipaddr=machine_ipaddr, cmd=cmd)
-            )
-            return _text(out)
-        except Exception as e:
-            # Surface the failure as an observation: raising here would abort
-            # the MCP request and leave the agent with no feedback at all.
-            return _text(f"Error executing command: {e!s}")
+        out, _ = run_step(
+            ExecuteBash(machine_ipaddr=machine_ipaddr, cmd=cmd),
+            "Error executing command",
+        )
+        return _text(out)
 
     @mcp.tool(description="Establish SSH connection to a remote machine")
     async def ssh_connect(
@@ -78,21 +87,16 @@ def create_mcp_server(task: str, flag: str, target: str) -> MCPServer:
         ssh_password: str = Field(..., description="SSH password")
     ) -> list[types.TextContent]:
         """Start an SSH session into the target machine"""
-        if _pentest_driver is None:
-            return _no_session()
-
-        try:
-            out, _ = _pentest_driver.step(
-                SSHConnect(
-                    ssh_ipaddr=ssh_ipaddr,
-                    ssh_port=ssh_port,
-                    ssh_username=ssh_username,
-                    ssh_password=ssh_password
-                )
-            )
-            return _text(out)
-        except Exception as e:
-            return _text(f"SSH connection failed: {e!s}")
+        out, _ = run_step(
+            SSHConnect(
+                ssh_ipaddr=ssh_ipaddr,
+                ssh_port=ssh_port,
+                ssh_username=ssh_username,
+                ssh_password=ssh_password
+            ),
+            "SSH connection failed",
+        )
+        return _text(out)
 
     @mcp.tool(description="Submit the final answer flag")
     async def final_answer(
@@ -100,13 +104,7 @@ def create_mcp_server(task: str, flag: str, target: str) -> MCPServer:
     ) -> list[types.TextContent]:
         """Provide the final flag of the CTF game. The flag is validated
         against the real one and the result reported to the agent."""
-        if _pentest_driver is None:
-            return _no_session()
-
-        try:
-            out, done = _pentest_driver.step(FinalAnswer(flag=flag))
-        except Exception as e:
-            return _text(f"Error submitting flag: {e!s}")
+        out, done = run_step(FinalAnswer(flag=flag), "Error submitting flag")
         if done:
             out += "\nThe pentest is complete."
         return _text(out)
@@ -118,18 +116,14 @@ def create_mcp_server(task: str, flag: str, target: str) -> MCPServer:
     ) -> list[types.TextContent]:
         """Write a script or a text into a file. The file will be located in
         the /root/scripts folder of Kali machine."""
-        if _pentest_driver is None:
-            return _no_session()
-
-        try:
-            out, _ = _pentest_driver.step(
-                WriteFile(content=content, file_name=file_name)
-            )
-            return _text(out)
-        except Exception as e:
-            return _text(f"Error writing file: {e!s}")
+        out, _ = run_step(
+            WriteFile(content=content, file_name=file_name),
+            "Error writing file",
+        )
+        return _text(out)
 
     return mcp
+
 
 def main() -> None:
     # Print to stderr only: stdout carries the stdio JSONRPC stream
