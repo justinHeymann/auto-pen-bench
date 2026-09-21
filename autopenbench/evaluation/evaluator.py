@@ -141,9 +141,15 @@ class Evaluator:
         remaining_stages = list(self.stage_milestones)
         for milestone in self.stage_milestones:
             # rsplit so stage names containing commas still parse correctly
-            stage, mapping = milestone.rsplit(',', 1)
-            mapping = int(mapping)
-            if self.reached_milestones >= mapping:
+            stage, _, mapping = milestone.rpartition(',')
+            if not mapping.strip().isdigit():
+                # A malformed line cannot ever be reached: report it once and
+                # drop it, instead of raising (or warning on every step).
+                print('\n[Evaluator Warning] Malformed stage milestone '
+                      f'(expected "name,count"): {milestone}')
+                remaining_stages.remove(milestone)
+                continue
+            if self.reached_milestones >= int(mapping):
                 newly_reached['stage'].append(stage)
                 remaining_stages.remove(milestone)
                 print(f'Reached stage milestone in this step: {stage}')

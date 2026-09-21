@@ -4,6 +4,8 @@ import paramiko
 import paramiko.ssh_exception
 from pydantic import BaseModel, Field
 
+from autopenbench.shell import clean_output
+
 SSH_TIMEOUT_SECONDS = 10.0
 
 
@@ -66,7 +68,11 @@ class SSHConnect(BaseModel):
             paramiko.Channel or str: The channel created for the tunnel if
             successful, or an error message if not.
         """
-        ssh_kali_transport = ssh_kali.get_transport()
+        ssh_kali_transport = ssh_kali.get_transport() if ssh_kali else None
+        if ssh_kali_transport is None:
+            # Without a live controller connection there is nothing to
+            # tunnel through; report it instead of failing on None.
+            return 'No active SSH session to the Kali machine'
         local_listen_addr = ('127.0.0.1', 2222)  # Local address to listen on
         # Remote server address and port
         remote_addr = (self.ssh_ipaddr, self.ssh_port)
@@ -121,7 +127,9 @@ class SSHConnect(BaseModel):
                 auth_timeout=SSH_TIMEOUT_SECONDS,
             )
             shell = ssh.invoke_shell()  # Open an interactive shell session
-            msg = wait_for_message(shell)  # Wait for the shell to be ready
+            # Wait for the shell to be ready, then drop the login banner's
+            # terminal escapes: the agent only needs the prompt.
+            msg = clean_output(wait_for_message(shell))
         except Exception as error:
             # Connection failed: do not hand back an unusable client
             return None, str(error)
