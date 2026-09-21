@@ -11,3 +11,8 @@ ignore = [
     # specific types would defeat that design.
     "BLE001",
 ]
+
+[lint.isort]
+# modules that live next to the code importing them: the package itself and
+# the test helpers in tests/support.py
+known-first-party = ["autopenbench", "support"]

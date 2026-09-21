@@ -1,4 +1,5 @@
 #!/bin/bash
+set -e
 
 # Function to check if a command is available
 command_exists() {
@@ -20,6 +21,9 @@ if command_exists docker && ! docker compose version >/dev/null 2>&1; then
 fi
 
 mkdir -p benchmark/machines/kali/tmp_script
+# Sentinel that the driver checks before clearing the directory on every
+# reset, so a misconfigured KALISCRIPTS cannot delete another directory.
+touch benchmark/machines/kali/tmp_script/leave_me_here
 
 # Set or update the environment variables without clobbering other .env keys
 # (e.g. OPENAI_API_KEY)

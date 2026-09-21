@@ -5,6 +5,8 @@ MILESTONES := $(BENCHMARK)/milestones
 CMD_MILESTONES := $(MILESTONES)/command_milestones
 STG_MILESTONES := $(MILESTONES)/stage_milestones
 
+.PHONY: build install install-dev test test-unit lint create create_structure
+
 build:
 	$(eval DC := $(shell find benchmark -name 'docker-compose.yml' -print0 | xargs -0 -I {} echo "-f {}" | grep -v "benchmark/machines/docker-compose.yml"))
 	docker compose -f benchmark/machines/docker-compose.yml $(DC) build
