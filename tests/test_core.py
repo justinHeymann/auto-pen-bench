@@ -69,6 +69,24 @@ class MarkerShell(FakeShell):
             self.output = f"{self.body}\n{match.group(0)}\n".encode()
 
 
+class PromptShell(FakeShell):
+    """Fake shell whose answer to a command is an interactive prompt.
+
+    Models a real `ssh` waiting for a password: `_drain` finds nothing
+    buffered, the prompt arrives only once the command has been sent, and
+    no completion marker ever follows it.
+    """
+
+    def __init__(self, prompt="student@192.168.1.0's password: "):
+        super().__init__(b"")
+        self.prompt = prompt
+
+    def send(self, value):
+        super().send(value)
+        self.output = b"^C\nroot@kali:~# " if value == "\x03" \
+            else self.prompt.encode()
+
+
 def test_write_file_sanitizes_name_and_preserves_content(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "autopenbench.tools.write_file.SCRIPTS", str(tmp_path)
@@ -146,6 +164,46 @@ def test_driver_only_registers_successful_ssh_connections(monkeypatch):
     output, _ = driver.step(ssh_tool)
 
     assert output == "connection refused"
+    assert "192.168.1.10" not in driver.remotes
+
+
+def test_driver_reopens_kali_shell_when_the_channel_died(monkeypatch):
+    """Killing sshd (or restarting the container) closes the controller
+    shell; the driver must rebuild it instead of failing every later command
+    with 'Socket is closed'."""
+    driver = PentestDriver("task", "flag", "target")
+    dead = FakeShell()
+    dead.closed = True
+    driver.remotes["192.168.0.5"] = RemoteShell(dead)
+
+    fresh = MarkerShell(body="uid=0(root)")
+    monkeypatch.setattr(
+        driver,
+        "_connect_to_kali",
+        lambda: SimpleNamespace(invoke_shell=lambda: fresh),
+    )
+    monkeypatch.setattr(pentest_driver, "wait_for_message", lambda _shell: "")
+
+    output, done = driver.step(
+        ExecuteBash(machine_ipaddr="192.168.0.5", cmd="id")
+    )
+
+    assert "uid=0(root)" in output
+    assert driver.remotes["192.168.0.5"].shell is fresh
+    assert done is False
+
+
+def test_driver_asks_the_agent_to_reconnect_a_dropped_remote_session():
+    driver = PentestDriver("task", "flag", "target")
+    dead = FakeShell()
+    dead.closed = True
+    driver.remotes["192.168.1.10"] = RemoteShell(dead)
+
+    output, _ = driver.step(
+        ExecuteBash(machine_ipaddr="192.168.1.10", cmd="id")
+    )
+
+    assert "SSHConnect" in output
     assert "192.168.1.10" not in driver.remotes
 
 
@@ -310,16 +368,91 @@ def test_execute_cmd_times_out_when_marker_never_arrives(monkeypatch):
     assert "Timed out waiting for shell prompt" in out
 
 
-def test_execute_cmd_sudo_uses_password_heuristic_without_marker():
+def test_execute_cmd_sudo_uses_password_heuristic_without_marker(monkeypatch):
     shell = FakeShell(output=b"[sudo] password for student:")
+    # Jump past the 15 s password-prompt deadline without sleeping.
+    ticks = itertools.count(0, 10)
+    monkeypatch.setattr(
+        remote_shell_mod.time, "monotonic", lambda: next(ticks)
+    )
 
     out = RemoteShell(shell).execute_cmd("sudo id")
 
     # No completion marker is sent for sudo/su (it could be consumed as the
     # password), and the password prompt is surfaced to the agent.
-    assert shell.sent == ["sudo id\n"]
+    assert "AUTOPENBENCH_DONE" not in "".join(shell.sent)
     assert "password" in out.lower()
-    assert "AUTOPENBENCH_DONE" not in out
+    # The prompt stays alive: the agent answers it with its next command.
+    assert "\x03" not in shell.sent
+
+
+def test_execute_cmd_leaves_a_su_password_prompt_waiting_for_input(monkeypatch):
+    """`su` is sent without a marker, so the agent answers it with the
+    password instead of the prompt being interrupted."""
+    shell = PromptShell(prompt="Password: ")
+    ticks = itertools.count(0, 0.1)
+    monkeypatch.setattr(
+        remote_shell_mod.time, "monotonic", lambda: next(ticks)
+    )
+
+    out = RemoteShell(shell).execute_cmd("su")
+
+    assert "\x03" not in shell.sent
+    assert "still waiting for input" in out
+    assert "Password:" in out
+
+
+def test_execute_cmd_interrupts_a_prompt_a_marker_command_cannot_answer(monkeypatch):
+    """A marker-carrying command waiting at a prompt must not outlive its step.
+
+    An `ssh` left reading the channel already ate the completion marker, eats
+    the *next* command too, and desynchronizes every later observation.
+    """
+    shell = PromptShell()
+    ticks = itertools.count(0, 0.1)
+    monkeypatch.setattr(
+        remote_shell_mod.time, "monotonic", lambda: next(ticks)
+    )
+
+    out = RemoteShell(shell).execute_cmd("ssh student@192.168.1.0")
+
+    assert "\x03" in shell.sent
+    assert "interrupted (Ctrl+C)" in out
+
+
+def test_execute_cmd_reports_when_interrupt_cannot_be_sent():
+    class BrokenShell(FakeShell):
+        def send(self, value):
+            super().send(value)
+            if value == "\x03":
+                raise socket.error("Socket is closed")
+
+    shell = BrokenShell(output=b"student@192.168.1.0's password: ")
+    remote_shell = RemoteShell(shell)
+    # Skip the retry loop: go straight to the interrupt path.
+    remote_shell.sudo = False
+
+    out = remote_shell._interrupt_foreground_process()
+
+    assert "no longer usable" in out
+
+
+def test_remote_shell_is_alive_tracks_channel_state():
+    shell = FakeShell()
+    remote_shell = RemoteShell(shell)
+
+    assert remote_shell.is_alive() is True
+
+    shell.closed = True
+    assert remote_shell.is_alive() is False
+
+
+def test_remote_shell_is_alive_reports_dead_transport():
+    class DeadTransportShell(FakeShell):
+        def get_transport(self):
+            return SimpleNamespace(is_active=lambda: False)
+
+    assert RemoteShell(DeadTransportShell()).is_alive() is False
 
 
 # --- Shell receive helpers ---------------------------------------------------
