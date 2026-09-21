@@ -142,9 +142,11 @@ def decode_payload(data: bytes) -> str:
 
     Everything left over -- a compiled binary, a ciphertext, a memory dump, a
     key file -- is mapped byte-for-byte with latin-1, where every byte has
-    exactly one character and the mapping is fixed. Whatever the accepted codec
-    cannot map is kept as a ``\\xNN`` escape rather than replaced with U+FFFD,
-    which would silently destroy the very bytes the agent is looking at.
+    exactly one character and the mapping is fixed. Unmappable bytes are never
+    replaced with U+FFFD (``errors='replace'``), which would silently destroy
+    the very bytes the agent is looking at: ``backslashreplace`` turns them
+    into multi-character escapes, which the one-byte-per-character check
+    rejects, sending the chunk to the latin-1 fallback instead.
 
     Args:
         data (bytes): A chunk received from the shell.
@@ -196,6 +198,21 @@ def receive_data(shell: paramiko.Channel, timeout: float = 2.0):
             return ''
 
     return decode_payload(data)  # Return the decoded text data
+
+
+def _asks_for_sudo_password(text: str) -> bool:
+    """True when the output's last line is a sudo password prompt.
+
+    Only the last line counts: the shell echoes the command line itself, so a
+    command that merely *mentions* a password (``sudo grep password
+    /etc/shadow``) must not end the wait before the real prompt arrives.
+    """
+    lines = [line.strip() for line in normalize_newlines(text).split('\n')
+             if line.strip()]
+    if not lines:
+        return False
+    last = lines[-1].lower()
+    return 'password for' in last or last.endswith('password:')
 
 
 def _looks_like_interactive_prompt(last_line: str) -> bool:
@@ -446,14 +463,19 @@ class RemoteShell:
         if first_word == 'sudo':
             # Password sudo: wait for the shell to ask for the sudo password,
             # or for the command to finish without asking for one.
-            while 'password' not in out.lower():
+            while not _asks_for_sudo_password(out):
                 last_line = normalize_newlines(out).split('\n')[-1] if out else ''
                 if '$' in last_line or '#' in last_line:
                     break
                 if time.monotonic() >= deadline:
-                    return (self._clean(out, marker, marker_command)
-                            + '\n[!] Timed out waiting for sudo password '
-                            'prompt.')
+                    # The command never asked for a password and outlived its
+                    # budget (a long scan with cached credentials, ...). Left
+                    # running it would keep writing to the channel and poison
+                    # later observations, so interrupt it the same way the
+                    # marker path does.
+                    out += self._interrupt_foreground_process(
+                        'without asking for a sudo password')
+                    return self._clean(out, marker, marker_command)
                 time.sleep(.5)  # Wait before attempting to receive more data
                 out += receive_data(self.shell, timeout=1.0)  # Append new data
             # Control continues to the tail below: the prompt has already been

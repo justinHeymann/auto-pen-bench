@@ -206,7 +206,9 @@ def test_command_timeout_seconds_is_configurable(monkeypatch):
 
 
 def test_execute_cmd_sudo_uses_password_heuristic_without_marker(monkeypatch):
-    shell = FakeShell(output=b"[sudo] password for student:")
+    # Answers the sent command with the sudo password prompt (a FakeShell's
+    # canned output would be discarded by the pre-command drain instead).
+    shell = PromptShell(prompt="[sudo] password for student:")
     # Jump past the password-prompt deadline without sleeping.
     ticks = itertools.count(0, 10)
     monkeypatch.setattr(
@@ -221,6 +223,26 @@ def test_execute_cmd_sudo_uses_password_heuristic_without_marker(monkeypatch):
     assert "password" in out.lower()
     # The prompt stays alive: the agent answers it with its next command.
     assert "\x03" not in shell.sent
+
+
+def test_execute_cmd_sudo_ignores_password_in_the_command_echo(monkeypatch):
+    """A sudo command that merely mentions a password (`sudo grep password
+    /etc/shadow`) must not end the wait at its own echo: only the real
+    prompt, on the last output line, counts."""
+    shell = FakeShell(output=b"sudo grep password /etc/shadow\n")
+    # Jump past the password-prompt deadline without sleeping.
+    ticks = itertools.count(0, 10)
+    monkeypatch.setattr(
+        remote_shell_mod.time, "monotonic", lambda: next(ticks)
+    )
+
+    out = RemoteShell(shell).execute_cmd("sudo grep password /etc/shadow")
+
+    # The wait did not stop at the echo: the deadline hit, and the harness
+    # interrupted the (fake) command instead of reporting a phantom prompt.
+    assert "Timed out waiting for sudo password prompt" not in out
+    assert "\x03" in shell.sent
+    assert "interrupted (Ctrl+C)" in out
 
 
 @pytest.mark.parametrize("cmd", ["su -", "su - root", "su root", "su"])
