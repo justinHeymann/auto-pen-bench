@@ -43,8 +43,32 @@ _COMMAND_WRAPPERS = frozenset({
     'timeout', 'watch', 'xargs', 'zsh',
 })
 
+# Shell keywords that may precede the program of a command, as in
+# `if nc -z host port; then id; fi`. The separators split that line into
+# `if nc -z host port` and ` then id`, which leaves the keyword as the
+# apparent *program* of the first segment -- so the program is taken after
+# skipping them. A keyword is not a wrapper: unlike `timeout 5 nc ...`, the
+# tokens after `if` are not program arguments, so they are not all inspected
+# (that would flag a harmless `if [ -f /tmp/socat ]`).
+_SHELL_KEYWORDS = frozenset({
+    '!', 'case', 'do', 'done', 'elif', 'else', 'esac', 'fi', 'if', 'then',
+    'until', 'while',
+})
+
 # Shell control operators that start a new command within the same line.
 _SEGMENT_SEPARATORS = re.compile(r'[;&|()\n]+')
+
+# Backquoted command substitution holds another command, which the separators
+# do not split off (`echo `nc ...`` is a single segment).
+_BACKQUOTED = re.compile(r'`([^`]*)`')
+
+# Programs that may ask for a password on the channel. Commands that run one
+# are sent without the completion marker, which would otherwise be typed into
+# the prompt and read as the password (see RemoteShell.execute_cmd).
+_PROMPTING_PROGRAMS = frozenset({'su', 'sudo'})
+
+# `FOO=1 sudo id` runs sudo, not `FOO=1`.
+_VARIABLE_ASSIGNMENT = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*=')
 
 
 def _names_forbidden_tool(token: str) -> bool:
@@ -65,16 +89,57 @@ def uses_forbidden_net_tool(cmd: str) -> bool:
     path-qualified and suffixed forms (``/usr/bin/nc``, ``nc.openbsd``) and
     separator-prefixed forms (``;nc``) still are. Everything after a command
     wrapper (``sudo``, ``timeout``, ``xargs``, ``bash -c``, ...) is inspected
-    as well, since that is where a withheld tool would be hiding.
+    as well, since that is where a withheld tool would be hiding, and so is
+    the body of a backquoted substitution, which the separators do not split.
     """
+    for backquoted in _BACKQUOTED.findall(cmd):
+        if uses_forbidden_net_tool(backquoted):
+            return True
+
     for segment in _SEGMENT_SEPARATORS.split(cmd):
         tokens = segment.strip().split()
+        # `if nc ...`, `while nc ...`: the keyword is not the program.
+        while tokens and tokens[0] in _SHELL_KEYWORDS:
+            tokens = tokens[1:]
         if not tokens:
             continue
         if _names_forbidden_tool(tokens[0]):
             return True
         if tokens[0] in _COMMAND_WRAPPERS and any(
                 _names_forbidden_tool(token) for token in tokens[1:]):
+            return True
+    return False
+
+
+def _program_of(tokens) -> str:
+    """The program a token list runs, skipping leading ``VAR=value`` words.
+
+    ``FOO=1 sudo id`` runs ``sudo``, not ``FOO=1``; the first token that is
+    not a variable assignment is the program.
+    """
+    for token in tokens:
+        if not _VARIABLE_ASSIGNMENT.match(token):
+            return token
+    return ''
+
+
+def may_prompt_for_password(cmd: str) -> bool:
+    """True if any command in ``cmd`` may ask for a password on the channel.
+
+    Covers the plain forms (``sudo ...``, ``su -``) and the ones where sudo is
+    not the first word of the line: behind a leading variable assignment
+    (``FOO=1 sudo id``), in another segment of a pipeline or list
+    (``cat hostlist | sudo tee /etc/hosts``), and behind a command wrapper
+    (``timeout 5 sudo id``).
+    """
+    for segment in _SEGMENT_SEPARATORS.split(cmd):
+        tokens = segment.strip().split()
+        program = _program_of(tokens)
+        if program in _PROMPTING_PROGRAMS:
+            return True
+        if program in _COMMAND_WRAPPERS and any(
+                _program_of(tokens[index:]) in _PROMPTING_PROGRAMS
+                for index in range(1, len(tokens))):
             return True
     return False
 
@@ -213,6 +278,23 @@ def _asks_for_sudo_password(text: str) -> bool:
         return False
     last = lines[-1].lower()
     return 'password for' in last or last.endswith('password:')
+
+
+def _is_shell_prompt(text: str) -> bool:
+    """True when the output ends at a shell prompt.
+
+    Covers the benchmark's ``user@host:~#`` prompts and a bare ``#``/``$``
+    one, while refusing an ordinary output line that merely contains or ends
+    with those characters: the last line must be a prompt *shape* (a
+    ``user@host`` prompt, or a single bare token), not the tail of the
+    command's own output.
+    """
+    lines = [line.strip() for line in normalize_newlines(text).split('\n')
+             if line.strip()]
+    if not lines:
+        return False
+    last = lines[-1]
+    return last.endswith(('$', '#')) and ('@' in last or ' ' not in last)
 
 
 def _looks_like_interactive_prompt(last_line: str) -> bool:
@@ -436,8 +518,11 @@ class RemoteShell:
         # command could never finish. Every other command gets the marker for
         # unambiguous completion detection.
         tokens = cmd.strip().split()
-        first_word = tokens[0] if tokens else ''
-        use_marker = first_word not in ('sudo', 'su')
+        # The first *program*, not the first token: `FOO=1 sudo id` runs sudo.
+        first_word = _program_of(tokens)
+        # A command that may prompt for a password is sent without the
+        # marker, which the prompt would read as the password (see below).
+        use_marker = not may_prompt_for_password(cmd)
 
         marker = None
         marker_command = None
@@ -464,8 +549,14 @@ class RemoteShell:
             # Password sudo: wait for the shell to ask for the sudo password,
             # or for the command to finish without asking for one.
             while not _asks_for_sudo_password(out):
-                last_line = normalize_newlines(out).split('\n')[-1] if out else ''
-                if '$' in last_line or '#' in last_line:
+                # Only a line that *is* a shell prompt ends the wait early
+                # (credentials already cached). Matching `$`/`#` anywhere in
+                # the last line instead used to stop on the command's own
+                # output: the last buffered line is also `''` whenever the
+                # chunk ends in a newline, and a chunk boundary falling inside
+                # a password-hash line of `sudo cat /etc/shadow` (which is
+                # full of `$`) handed the agent a truncated observation.
+                if _is_shell_prompt(out):
                     break
                 if time.monotonic() >= deadline:
                     # The command never asked for a password and outlived its

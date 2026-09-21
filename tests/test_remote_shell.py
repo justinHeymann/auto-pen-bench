@@ -50,6 +50,14 @@ def test_remote_shell_blocks_forbidden_network_tools():
         "busybox nc -l 1",
         "sudo -u root socat TCP-LISTEN:4444,fork",
         'bash -c "nc -l 1"',
+        # Behind a shell keyword, where the separators leave the keyword as
+        # the apparent program of the segment (`if nc ...; then id; fi`)
+        "if nc -z 192.168.1.0 22; then id; fi",
+        "while nc -z 192.168.1.0 22; do id; done",
+        "! nc -l 4444",
+        # Inside a backquoted substitution, which the separators do not split
+        "echo `nc -l 4444`",
+        "for h in 1 2; do echo `ncat -l 1`; done",
     ],
 )
 def test_uses_forbidden_net_tool_blocks_variants(cmd):
@@ -64,10 +72,40 @@ def test_uses_forbidden_net_tool_blocks_variants(cmd):
         "which ncat",
         "nmap -sV 192.168.1.0",
         "sudo nmap -sV 192.168.1.0",
+        # A keyword segment must not turn its other tokens into programs:
+        # only the token *after* the keyword is one.
+        "if [ -f /tmp/socat ]; then id; fi",
+        "test -e /usr/bin/nc && echo present",
     ],
 )
 def test_uses_forbidden_net_tool_allows_plain_mentions(cmd):
     assert remote_shell_mod.uses_forbidden_net_tool(cmd) is False
+
+
+# --- Deciding whether to send the completion marker -------------------------
+
+
+@pytest.mark.parametrize(
+    "cmd",
+    [
+        "sudo id",
+        "su -",
+        "FOO=1 sudo id",
+        "cat hostlist | sudo tee -a /etc/hosts",
+        "timeout 5 sudo id",
+        "(sudo id)",
+    ],
+)
+def test_may_prompt_for_password_detects_sudo_anywhere(cmd):
+    assert remote_shell_mod.may_prompt_for_password(cmd) is True
+
+
+@pytest.mark.parametrize(
+    "cmd",
+    ["search sudo 1.8.31", "echo sudo", "ls | grep su", "grep -rn sudo /etc"],
+)
+def test_may_prompt_for_password_ignores_mentions(cmd):
+    assert remote_shell_mod.may_prompt_for_password(cmd) is False
 
 
 # --- Completion-marker protocol ---------------------------------------------
@@ -245,6 +283,84 @@ def test_execute_cmd_sudo_ignores_password_in_the_command_echo(monkeypatch):
     assert "interrupted (Ctrl+C)" in out
 
 
+def test_execute_cmd_sudo_keeps_output_that_resembles_a_prompt(monkeypatch):
+    """The wait must not end on the command's own output.
+
+    It used to end as soon as the last buffered line *contained* `$` or `#`.
+    `sudo cat /etc/shadow` prints lines full of `$` (the password hashes), so
+    a chunk boundary falling inside one of them returned a truncated
+    observation, and everything after it was discarded by the next command's
+    drain -- a silently wrong result, with nothing to tell the agent.
+    """
+    shell = ChunkedShell(lead_chunks=(
+        b"root@kali:~# sudo cat /etc/shadow\nroot:$y$j9T$abc",
+        b"\nstudent:!:19000:0:99999:7:::\nroot@kali:~# ",
+    ))
+    monkeypatch.setattr(remote_shell_mod.time, "sleep", lambda _seconds: None)
+
+    out = RemoteShell(shell).execute_cmd("sudo cat /etc/shadow")
+
+    assert "student:" in out          # the whole file arrived, not one chunk
+    assert "interrupted" not in out
+
+
+def test_execute_cmd_sudo_still_ends_early_at_a_shell_prompt(monkeypatch):
+    """The fast path the check existed for is kept.
+
+    With credentials already cached, sudo finishes without asking for a
+    password: the wait must end at the prompt instead of sitting out the whole
+    budget and then interrupting a command that had already finished.
+    """
+    shell = ChunkedShell(lead_chunks=(
+        b"root@kali:~# sudo id\n",
+        b"uid=0(root)\nroot@kali:~# ",
+    ))
+    monkeypatch.setattr(remote_shell_mod.time, "sleep", lambda _seconds: None)
+
+    out = RemoteShell(shell).execute_cmd("sudo id")
+
+    assert "uid=0(root)" in out
+    assert "\x03" not in shell.sent
+    assert "interrupted" not in out
+
+
+@pytest.mark.parametrize(
+    "cmd",
+    [
+        "sudo id",
+        "FOO=1 sudo id",
+        "cat hostlist | sudo tee -a /etc/hosts",
+        "timeout 5 sudo id",
+    ],
+)
+def test_execute_cmd_sends_no_marker_for_sudo_beyond_the_first_word(
+        cmd, monkeypatch):
+    """The marker is read as the password, so *any* command that may prompt
+    must be sent without it -- including the spellings where sudo is not the
+    first token of the line."""
+    shell = FakeShell(output=b"Password: ")
+    ticks = itertools.count(0, 10)
+    monkeypatch.setattr(remote_shell_mod.time, "monotonic", lambda: next(ticks))
+    monkeypatch.setattr(remote_shell_mod.time, "sleep", lambda _s: None)
+
+    RemoteShell(shell).execute_cmd(cmd)
+
+    assert "AUTOPENBENCH_DONE" not in "".join(shell.sent)
+
+
+def test_execute_cmd_keeps_the_marker_when_sudo_is_only_mentioned(monkeypatch):
+    """`search sudo 1.8.31` is an msfconsole command, not a sudo invocation.
+
+    Dropping its marker would cost the command its unambiguous completion,
+    and the whole step its budget.
+    """
+    shell = MarkerShell(body="msf6 > ")
+
+    RemoteShell(shell).execute_cmd("search sudo 1.8.31")
+
+    assert "AUTOPENBENCH_DONE" in "".join(shell.sent)
+
+
 @pytest.mark.parametrize("cmd", ["su -", "su - root", "su root", "su"])
 def test_execute_cmd_sends_no_marker_for_su_variants(cmd, monkeypatch):
     """Every `su` form must be sent without a completion marker.
@@ -373,6 +489,22 @@ def test_normalize_newlines_repairs_the_duplicated_wrap_character():
     # Real CRLF line endings and blank lines stay intact.
     assert normalize_newlines("a\r\nb\r\nc") == "a\nb\nc"
     assert normalize_newlines("a\n\r\nb") == "a\n\nb"
+
+
+def test_is_shell_prompt_matches_prompts_but_not_output_lines():
+    """The sudo fast path ends on a prompt *shape*.
+
+    Matching `$`/`#` anywhere in the last line instead would end the wait on
+    the command's own output (a hash line, an `ls` of a directory holding a
+    `#`-named file, ...).
+    """
+    assert remote_shell_mod._is_shell_prompt("root@kali:~# ") is True
+    assert remote_shell_mod._is_shell_prompt("whoami\nroot\n# ") is True
+    assert remote_shell_mod._is_shell_prompt("student@vm0:~$ ") is True
+
+    assert remote_shell_mod._is_shell_prompt("root:$y$j9T$abc") is False
+    assert remote_shell_mod._is_shell_prompt("total 42 #") is False
+    assert remote_shell_mod._is_shell_prompt("") is False
 
 
 def test_clean_output_strips_escapes_and_normalises_line_endings():
