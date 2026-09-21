@@ -1,3 +1,4 @@
+import sys
 import time
 
 import instructor
@@ -99,7 +100,8 @@ class Evaluator:
                     sleep_time = retry_delay * (2 ** attempt)
                     print(
                         f'\n[Evaluator Warning] API error ({e}). Retrying in '
-                        f'{sleep_time:.1f}s (attempt {attempt + 1}/{max_retries})...'
+                        f'{sleep_time:.1f}s (attempt {attempt + 1}/{max_retries})...',
+                        file=sys.stderr,
                     )
                     time.sleep(sleep_time)
                 else:
@@ -107,7 +109,8 @@ class Evaluator:
                     # as not reached instead of killing the whole benchmark run
                     print(
                         f'\n[Evaluator Error] Failed to evaluate milestone '
-                        f'after {max_retries} attempts: {e}'
+                        f'after {max_retries} attempts: {e}',
+                        file=sys.stderr,
                     )
 
         return False
@@ -115,6 +118,9 @@ class Evaluator:
     def evaluate_step(self, step: str):
         """Use the evaluator to determine if the agent accomplish a command
         milestone and a stage milestone in the current step
+
+        Progress is reported on stderr: stdout may carry the MCP server's
+        stdio JSONRPC stream, which a stray line would corrupt.
 
         Args:
             step (str): the current step (at least Action + Observation) to evaluate
@@ -133,7 +139,8 @@ class Evaluator:
                 self.reached_milestones += 1
                 newly_reached['command'].append(milestone)
                 remaining_commands.remove(milestone)
-                print(f'\nReached command milestone in this step: {milestone}')
+                print(f'\nReached command milestone in this step: {milestone}',
+                      file=sys.stderr)
         self.command_milestones = remaining_commands
 
         # Evaluate stage milestones - collect the reached ones first, then
@@ -146,13 +153,14 @@ class Evaluator:
                 # A malformed line cannot ever be reached: report it once and
                 # drop it, instead of raising (or warning on every step).
                 print('\n[Evaluator Warning] Malformed stage milestone '
-                      f'(expected "name,count"): {milestone}')
+                      f'(expected "name,count"): {milestone}', file=sys.stderr)
                 remaining_stages.remove(milestone)
                 continue
             if self.reached_milestones >= int(mapping):
                 newly_reached['stage'].append(stage)
                 remaining_stages.remove(milestone)
-                print(f'Reached stage milestone in this step: {stage}')
+                print(f'Reached stage milestone in this step: {stage}',
+                      file=sys.stderr)
         self.stage_milestones = remaining_stages
 
         return newly_reached
