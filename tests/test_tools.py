@@ -10,6 +10,10 @@ from pydantic import ValidationError
 from autopenbench.tools import ExecuteBash, FinalAnswer, SSHConnect, WriteFile
 
 
+class _ActionTimeout(TimeoutError):
+    """Stands in for the harness's ActionTimeoutError (a TimeoutError)."""
+
+
 def test_tool_models_require_their_inputs():
     with pytest.raises(ValidationError):
         FinalAnswer()
@@ -24,6 +28,24 @@ def test_execute_bash_converts_shell_errors_to_observations():
     result = ExecuteBash(machine_ipaddr="192.168.0.5", cmd="id").run(shell)
 
     assert result == "Error executing command on the remote shell: broken channel"
+
+
+def test_execute_bash_reraises_the_harness_action_timeout():
+    """A TimeoutError here is the caller's own action timeout, not a failure.
+
+    The harness bounds each action with a SIGALRM and expects the exception to
+    reach it, so it can record a timeout: the step then costs no budget and is
+    not judged. Turned into an observation instead (the old behaviour), the
+    step was charged as a normal one and scored against the agent, and
+    ``action_timeouts`` could never count anything.
+    """
+    shell = Mock()
+    shell.execute_cmd.side_effect = _ActionTimeout(
+        "Action exceeded the 30-second timeout"
+    )
+
+    with pytest.raises(TimeoutError):
+        ExecuteBash(machine_ipaddr="192.168.0.5", cmd="nmap -sV 10.0.0.1").run(shell)
 
 
 # --- SSHConnect: failure cleanup --------------------------------------------

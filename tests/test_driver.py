@@ -2,11 +2,17 @@
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+import pytest
+
 from autopenbench.driver import pentest_driver
 from autopenbench.driver.pentest_driver import PentestDriver
 from autopenbench.shell.remote_shell import RemoteShell
 from autopenbench.tools import ExecuteBash, FinalAnswer, SSHConnect, WriteFile
 from support import FakeShell, MarkerShell
+
+
+class _ActionTimeout(TimeoutError):
+    """Stands in for the harness's ActionTimeoutError (a TimeoutError)."""
 
 # --- Routing ----------------------------------------------------------------
 
@@ -234,9 +240,15 @@ def test_driver_appends_hint_to_host_key_prompts():
 
 
 def test_driver_appends_the_msf_hint_to_a_meterpreter_prompt():
-    """The shell layer labels a Metasploit session `meterpreter >`, which
-    names neither `msf` nor `msfconsole`: matching only `msf` left the agent
-    without the hint that its next command goes to that session."""
+    """A session prompt must say where the agent's next command runs.
+
+    The shell layer labels a Metasploit session `meterpreter >`, which names
+    neither `msf` nor `msfconsole`. The hint used to call it an interactive
+    msfconsole, so a run that already held a shell on the target kept sending
+    msfconsole commands that the session answered with `msfconsole: not found`
+    instead of reading the flag. The prompt is a session on the target, and the
+    hint now says so.
+    """
     driver = PentestDriver("task", "flag", "target")
     shell = Mock()
     shell.execute_cmd.return_value = "Command shell session 1 opened\nmeterpreter >"
@@ -246,7 +258,41 @@ def test_driver_appends_the_msf_hint_to_a_meterpreter_prompt():
         ExecuteBash(machine_ipaddr="192.168.1.10", cmd="id")
     )
 
+    assert "session on the target" in out
+    assert "exit" in out
+    assert "interactive msfconsole" not in out
+
+
+def test_driver_keeps_the_msfconsole_hint_for_an_msfconsole_prompt():
+    driver = PentestDriver("task", "flag", "target")
+    shell = Mock()
+    shell.execute_cmd.return_value = "meterpreter session 1 opened\nmsf6 >"
+    driver.remotes["192.168.1.10"] = shell
+
+    out, _ = driver.step(
+        ExecuteBash(machine_ipaddr="192.168.1.10", cmd="id")
+    )
+
     assert "interactive msfconsole" in out
+
+
+def test_driver_reraises_the_action_timeout_instead_of_observing_it(monkeypatch):
+    """The runner's action timeout must not be scored as the agent's action.
+
+    Converting it into an observation is what the surrounding ``except
+    Exception`` does for real environment failures, but a timeout says nothing
+    about the agent: the runner refunds the step and counts it in
+    ``action_timeouts`` only when the exception reaches it.
+    """
+    driver = PentestDriver("task", "flag", "target")
+
+    def _timeout(tool):
+        raise _ActionTimeout("Action exceeded the 30-second timeout")
+
+    monkeypatch.setattr(driver, "_run_tool", _timeout)
+
+    with pytest.raises(TimeoutError):
+        driver.step(ExecuteBash(machine_ipaddr="192.168.0.5", cmd="id"))
 
 
 # --- Flag submission --------------------------------------------------------

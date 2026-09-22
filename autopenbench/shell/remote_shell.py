@@ -27,6 +27,13 @@ def command_timeout_seconds() -> float:
                                 DEFAULT_COMMAND_TIMEOUT_SECONDS))
 
 
+# Seconds allowed for a re-sent completion marker to come back before a command
+# that looks finished is treated as stuck. The re-send only happens once the
+# buffer already ends at the shell's own prompt, so one read is normally
+# enough: bash executes the line as soon as it is at a prompt.
+MARKER_REPROBE_GRACE_SECONDS = 2.0
+
+
 # Network tools the benchmark deliberately withholds from the agent; the
 # tasks that need them ship an adapted exploit instead. This filter is a
 # guardrail, not a sandbox: it cannot see a withheld tool invoked from inside
@@ -450,6 +457,46 @@ class RemoteShell:
             '(Ctrl+C) so the shell stays usable.'
         )
 
+    def _reprobe_completion_marker(self, out: str, marker: str | None,
+                                  marker_command: str | None) -> bool:
+        """Re-send a completion marker the command may have discarded.
+
+        Some programs flush the PTY input queue while they run -- nmap does it
+        for every scan wider than a single host, discarding the marker line
+        typed ahead of it. The command then finishes and prints the shell
+        prompt without its marker, which is indistinguishable from a program
+        waiting for input; the driver used to answer that with Ctrl+C and
+        report a step whose result it could not observe, although the command's
+        full output (its scan report included) was already in hand.
+
+        Re-sending is safe at this point and only at this point: the buffer
+        ends at a shell prompt, so the shell has taken the channel back and
+        there is normally nothing left to read the marker as input -- or to
+        discard it. Should the prompt-shaped line have come from the command
+        itself, the marker simply stays queued like the one sent with the
+        command, and the grace period expires into the ordinary give-up path.
+
+        It is attempted at most once per command, and only as a last resort
+        before that path.
+
+        Args:
+            out (str): Output collected for this command so far.
+            marker (str or None): The completion marker, if one was sent.
+            marker_command (str or None): The command that prints it.
+
+        Returns:
+            bool: True if the marker was re-sent, i.e. the caller should keep
+                polling for it instead of giving up on the command.
+        """
+        if marker is None or not _is_shell_prompt(out):
+            return False
+        try:
+            self.shell.send(f'{marker_command}\n')
+        except Exception as error:
+            logger.debug('could not re-send the completion marker: %s', error)
+            return False
+        return True
+
     def check_metasploit_shell(self, out: str):
         """Checks whether the session output indicates a Metasploit shell.
 
@@ -580,6 +627,13 @@ class RemoteShell:
             # producing output is not waiting for input, so only silent polls
             # count towards the stuck-command heuristic below.
             quiet = out == ''
+            # Whether the marker has already been re-sent because the shell
+            # prompt came back without it, and when its grace period ends (see
+            # _reprobe_completion_marker). Neither ever shortens the command's
+            # own budget: the grace only decides how long the give-up paths
+            # wait for the re-sent marker first.
+            marker_reprobed = False
+            marker_reprobe_deadline = 0.0
             while True:
                 # A CRLF split across two reads would only be joined by
                 # normalising the buffer as a whole.
@@ -630,7 +684,28 @@ class RemoteShell:
                 if 'What do you want to do about modified configuration '\
                         'file sshd_config?' in text:
                     break
-                if stuck_polls >= 3:
+                # A pending re-probe holds off both give-up paths below until
+                # its grace period is over: its marker is the missing piece of
+                # evidence, and the very next poll is normally where it lands.
+                if (stuck_polls >= 3
+                        and time.monotonic() >= marker_reprobe_deadline):
+                    # Before escaping a command that looks stuck at a prompt,
+                    # rule out the one way a *finished* command can look like
+                    # one: a program that flushed the marker line out of the
+                    # PTY input queue while it ran (see
+                    # _reprobe_completion_marker). If the buffer already ends
+                    # at the shell's own prompt, the marker is all that is
+                    # missing, so ask for it again instead of destroying the
+                    # output the command already produced.
+                    if (not marker_reprobed
+                            and self._reprobe_completion_marker(
+                                out, marker, marker_command)):
+                        marker_reprobed = True
+                        marker_reprobe_deadline = (
+                            time.monotonic() + MARKER_REPROBE_GRACE_SECONDS
+                        )
+                        stuck_polls = 0
+                        continue
                     # A marker-carrying command cannot be answered
                     # interactively: the harness already typed the
                     # completion marker, which an interactive program
@@ -649,7 +724,20 @@ class RemoteShell:
                         )
                     break
 
-                if time.monotonic() >= deadline:
+                if (time.monotonic() >= deadline
+                        and time.monotonic() >= marker_reprobe_deadline):
+                    # Same recovery as above, for the commands that reach their
+                    # budget instead of the stuck-poll heuristic -- a scan that
+                    # finished just as the budget ran out is otherwise
+                    # reported as a lost step although its report is in hand.
+                    if (not marker_reprobed
+                            and self._reprobe_completion_marker(
+                                out, marker, marker_command)):
+                        marker_reprobed = True
+                        marker_reprobe_deadline = (
+                            time.monotonic() + MARKER_REPROBE_GRACE_SECONDS
+                        )
+                        continue
                     # The command never printed its completion marker: it is
                     # either stuck at a prompt or simply outlived its budget
                     # (a shell loop, an endless scan). Left running, it would

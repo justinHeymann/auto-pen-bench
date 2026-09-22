@@ -19,6 +19,16 @@ class ExecuteBash(BaseModel):
         """
         try:
             output = shell.execute_cmd(self.cmd)
+        except TimeoutError:
+            # Not a command failure: a TimeoutError reaching this point is the
+            # caller's own action timeout (a SIGALRM raised inside the call),
+            # which means the harness gave up on the step and the result says
+            # nothing about the agent. Turned into an observation it would be
+            # scored as the agent's own action; re-raised, the runner records
+            # an action timeout, does not spend the step budget on it and does
+            # not judge it. Environment failures the agent should see (a dead
+            # channel, a refused connection) still become observations below.
+            raise
         except Exception as e:
             output = f"Error executing command on the remote shell: {e}"
         return output
