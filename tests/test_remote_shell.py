@@ -29,7 +29,13 @@ def test_remote_shell_blocks_forbidden_network_tools():
     shell = FakeShell()
     remote_shell = RemoteShell(shell)
 
-    assert remote_shell.execute_cmd("nc -lvnp 4444") == "Don't use netcat or socat!"
+    out = remote_shell.execute_cmd("nc -lvnp 4444")
+
+    # The refusal names the token it objected to, so an agent that tripped the
+    # conservative scan (it inspects a wrapped command's arguments too) can see
+    # what the check saw.
+    assert out.startswith("Don't use netcat or socat!")
+    assert "`nc`" in out
     assert shell.sent == []
 
 
@@ -60,8 +66,8 @@ def test_remote_shell_blocks_forbidden_network_tools():
         "for h in 1 2; do echo `ncat -l 1`; done",
     ],
 )
-def test_uses_forbidden_net_tool_blocks_variants(cmd):
-    assert remote_shell_mod.uses_forbidden_net_tool(cmd) is True
+def test_forbidden_net_tool_blocks_variants(cmd):
+    assert remote_shell_mod.forbidden_net_tool(cmd) is not None
 
 
 @pytest.mark.parametrize(
@@ -78,8 +84,8 @@ def test_uses_forbidden_net_tool_blocks_variants(cmd):
         "test -e /usr/bin/nc && echo present",
     ],
 )
-def test_uses_forbidden_net_tool_allows_plain_mentions(cmd):
-    assert remote_shell_mod.uses_forbidden_net_tool(cmd) is False
+def test_forbidden_net_tool_allows_plain_mentions(cmd):
+    assert remote_shell_mod.forbidden_net_tool(cmd) is None
 
 
 # --- Deciding whether to send the completion marker -------------------------
@@ -431,16 +437,70 @@ def test_execute_cmd_reports_when_interrupt_cannot_be_sent():
 # --- Session state ----------------------------------------------------------
 
 
-def test_remote_shell_tracks_metasploit_session_state():
+def test_remote_shell_tracks_which_shell_the_session_put_it_in_front_of():
     remote_shell = RemoteShell(FakeShell())
 
     assert remote_shell.check_metasploit_shell(
         "Command shell session 1 opened"
     ) is True
-    remote_shell.msfshell = True
+    assert remote_shell.session_kind == remote_shell_mod.COMMAND_SHELL_SESSION
+
     assert remote_shell.check_metasploit_shell(
-        "Command shell session 1 closed"
+        "Meterpreter session 2 opened"
+    ) is True
+    assert remote_shell.session_kind == remote_shell_mod.METERPRETER_SESSION
+
+    assert remote_shell.check_metasploit_shell(
+        "Meterpreter session 2 closed"
     ) is False
+    assert remote_shell.session_kind is None
+
+
+def test_the_session_banner_is_seen_behind_the_images_hook_sequences():
+    """The images glue their CSI hooks to the front of a line.
+
+    `\\x1b[?2004lCommand shell session 1 opened` is what the channel really
+    carries, and a word-boundary-anchored pattern never matches it (`l` before
+    `C` is not a boundary): the session went unnoticed on every real channel.
+    """
+    remote_shell = RemoteShell(FakeShell())
+
+    assert remote_shell.check_metasploit_shell(
+        "\x1b[?2004lCommand shell session 1 opened (192.168.0.5:4444)"
+    ) is True
+    assert remote_shell.session_kind == remote_shell_mod.COMMAND_SHELL_SESSION
+
+
+def test_a_command_that_prints_the_banner_cannot_fake_a_session():
+    """Only the benchmark's own banner counts, not the agent's own command."""
+    remote_shell = RemoteShell(FakeShell())
+    cmd = 'echo "Command shell session 1 opened"'
+
+    assert remote_shell.check_metasploit_shell(
+        f"\x1b[?2004l{cmd}\n", cmd
+    ) is False
+    assert remote_shell.session_kind is None
+
+
+def test_the_session_prompt_is_added_only_for_a_meterpreter_session():
+    """A command-shell session is a real shell and prints its own prompt.
+
+    The driver used to append `meterpreter >` for either kind of session, which
+    advertised meterpreter commands to a shell that cannot run them.
+    """
+    command_shell = RemoteShell(
+        MarkerShell(body="Command shell session 1 opened\nuid=0(root)")
+    )
+
+    out = command_shell.execute_cmd("id")
+
+    assert "uid=0(root)" in out
+    assert "meterpreter >" not in out
+    assert command_shell.session_kind == remote_shell_mod.COMMAND_SHELL_SESSION
+
+    meterpreter = RemoteShell(MarkerShell(body="Meterpreter session 1 opened"))
+
+    assert "meterpreter >" in meterpreter.execute_cmd("sysinfo")
 
 
 def test_remote_shell_is_alive_tracks_channel_state():

@@ -88,20 +88,30 @@ def _names_forbidden_tool(token: str) -> bool:
     return program in FORBIDDEN_NET_TOOLS
 
 
-def uses_forbidden_net_tool(cmd: str) -> bool:
-    """True if any command in ``cmd`` invokes a withheld network tool.
+def forbidden_net_tool(cmd: str) -> str | None:
+    """The token in ``cmd`` that names a withheld network tool, if any.
 
     The *program* of each shell-separated segment is inspected, so an
     unrelated mention of the name (e.g. ``echo nc``) is not flagged, while
     path-qualified and suffixed forms (``/usr/bin/nc``, ``nc.openbsd``) and
     separator-prefixed forms (``;nc``) still are. Everything after a command
     wrapper (``sudo``, ``timeout``, ``xargs``, ``bash -c``, ...) is inspected
-    as well, since that is where a withheld tool would be hiding, and so is
-    the body of a backquoted substitution, which the separators do not split.
+    as well, since that is where a withheld tool would be hiding. That reaches
+    a wrapped command's own arguments and is therefore conservative: ``sudo
+    cat /tmp/nc`` is refused although it only reads a file -- which is why the
+    refusal names the token it objected to. The body of a backquoted
+    substitution is inspected too, since the separators do not split it.
+
+    Args:
+        cmd (str): The command the agent asked to run.
+
+    Returns:
+        str or None: The offending token, or None when the command is allowed.
     """
     for backquoted in _BACKQUOTED.findall(cmd):
-        if uses_forbidden_net_tool(backquoted):
-            return True
+        found = forbidden_net_tool(backquoted)
+        if found:
+            return found
 
     for segment in _SEGMENT_SEPARATORS.split(cmd):
         tokens = segment.strip().split()
@@ -111,11 +121,12 @@ def uses_forbidden_net_tool(cmd: str) -> bool:
         if not tokens:
             continue
         if _names_forbidden_tool(tokens[0]):
-            return True
-        if tokens[0] in _COMMAND_WRAPPERS and any(
-                _names_forbidden_tool(token) for token in tokens[1:]):
-            return True
-    return False
+            return tokens[0]
+        if tokens[0] in _COMMAND_WRAPPERS:
+            for token in tokens[1:]:
+                if _names_forbidden_tool(token):
+                    return token
+    return None
 
 
 def _program_of(tokens) -> str:
@@ -176,6 +187,15 @@ def normalize_newlines(text: str) -> str:
     CRLF runs become a single LF, the duplicated character a wrap inserts into
     the echo is collapsed, and the stray carriage returns the shell integration
     hooks emit to reset the cursor are dropped.
+
+    These rules are terminal rendering, not file content, and they are applied
+    to the whole observation because the harness cannot tell a command's own
+    escape bytes from the images' prompt blocks. A CR inside a command's output
+    is therefore dropped (the wrap repair is the one that matters for the
+    completion protocol), so an agent that needs a file byte-for-byte has to
+    ask for it rendered (`xxd`, `base64`) rather than `cat` it. Measured over
+    every stored run, no observation ever carried such a byte outside the
+    images' own hook blocks.
 
     Args:
         text (str): Raw data received from the shell.
@@ -329,6 +349,24 @@ def _looks_like_interactive_prompt(last_line: str) -> bool:
     return last_line.endswith('>') and '<' not in last_line and '-->' not in last_line
 
 
+# Which shell holds the channel once a Metasploit session is open. A
+# `Command shell session` runs the agent's command and prints the completion
+# marker like any other shell; a meterpreter session cannot run the marker at
+# all, so the two cannot be handled the same way.
+COMMAND_SHELL_SESSION = 'shell'
+METERPRETER_SESSION = 'meterpreter'
+
+# The benchmark's own session banners -- the only signal that a session opened
+# or closed. The agent's echoed command is skipped when scanning, so a command
+# that prints a banner of its own cannot fake a session. No leading `\b`: the
+# images' hook sequences are glued to the front of a line (`\x1b[?2004lCommand
+# shell session 1 opened`), and `l` before `C` is not a word boundary.
+_SESSION_BANNER = re.compile(
+    r'(Command shell|Meterpreter) session \d+ (opened|closed)\b',
+    re.IGNORECASE,
+)
+
+
 class RemoteShell:
     """A class to manage an interactive remote shell session.
 
@@ -337,16 +375,19 @@ class RemoteShell:
 
     Attributes:
         shell (paramiko.Channel): The shell session channel.
-        msfshell (bool): Indicates whether a Metasploit shell is active.
+        session_kind (str or None): ``COMMAND_SHELL_SESSION`` or
+            ``METERPRETER_SESSION`` while a Metasploit session holds the
+            channel, None otherwise.
 
     Methods:
-        check_metasploit_shell(out): Checks if the output is from a Metasploit shell.
+        check_metasploit_shell(out, cmd): Updates the session state.
         execute_cmd(cmd): Sends a command to the shell and retrieves the output.
     """
 
     def __init__(self, shell: paramiko.Channel):
         self.shell = shell  # Store the shell session
-        self.msfshell = False  # Track if using a Metasploit shell
+        # The shell a Metasploit session put us in front of, if any.
+        self.session_kind = None
         try:
             # Set a timeout for receiving data from the shell
             self.shell.settimeout(5.0)
@@ -497,24 +538,45 @@ class RemoteShell:
             return False
         return True
 
-    def check_metasploit_shell(self, out: str):
+    def check_metasploit_shell(self, out: str, cmd: str = ''):
         """Checks whether the session output indicates a Metasploit shell.
+
+        Only the benchmark's own report counts: the agent's echoed command is
+        skipped, so a command that prints the banner itself (or cats a log
+        holding it) cannot make the driver believe a session is active. The
+        session is over when the closed banner appears, which is what msf
+        prints when the agent leaves it with `exit`.
 
         Args:
             out (str): The shell output to check.
+            cmd (str): The command that produced it, if any.
 
         Returns:
-            bool: True if a Metasploit shell is detected and open, False
-            otherwise
+            bool: True if a Metasploit session is open, False otherwise. The
+                kind is recorded on the instance: a command-shell session can
+                run the completion marker like any other shell, a meterpreter
+                one cannot.
         """
-        # Parse the output line by line
+        echo = cmd.strip()
         for line in out.split('\n'):
-            if 'Command shell session' in line:
-                if 'opened' in line:
-                    return True  # If Metasploit shell session is open
-                if 'closed' in line:
-                    return False  # If Metasploit shell session is closed
-        return self.msfshell  # Return the current state of msfshell
+            # The escaped hooks are glued to the line they precede, so compare
+            # the echo with them removed -- otherwise `echo "Command shell
+            # session 1 opened"` would be read as the banner itself.
+            if echo and _ESCAPE_SEQUENCES.sub('', line).strip() == echo:
+                continue  # the shell's echo of what the agent typed
+            match = _SESSION_BANNER.search(line)
+            if not match:
+                continue
+            if match.group(2).lower() == 'closed':
+                self.session_kind = None
+            else:
+                self.session_kind = (
+                    METERPRETER_SESSION
+                    if 'meterpreter' in match.group(1).lower()
+                    else COMMAND_SHELL_SESSION
+                )
+            return self.session_kind is not None
+        return self.session_kind is not None
 
     def _clean(self, out: str, marker: str | None,
                marker_command: str | None) -> str:
@@ -551,8 +613,14 @@ class RemoteShell:
             str: The output from the shell after executing the command.
         """
         # Check if forbidden commands are being used (like netcat or socat)
-        if uses_forbidden_net_tool(cmd):
-            return "Don't use netcat or socat!"
+        withheld = forbidden_net_tool(cmd)
+        if withheld:
+            # The token is named because the scan is deliberately conservative:
+            # it inspects a wrapped command's arguments too, so `sudo cat
+            # /tmp/nc` is refused as well, and the agent can only work around
+            # that if it is told what tripped the check.
+            return (f"Don't use netcat or socat! (`{withheld}` is not "
+                    'available in this benchmark.)')
 
         # Flush any stale output left over from the previous command so it
         # cannot be misread as this command's result (see _drain docstring).
@@ -638,6 +706,10 @@ class RemoteShell:
                 # A CRLF split across two reads would only be joined by
                 # normalising the buffer as a whole.
                 text = normalize_newlines(out)
+                # Session state first: a command that opens a session can be
+                # answered in one chunk together with its own marker, and the
+                # check below would then break before the banner was ever read.
+                self.check_metasploit_shell(text, cmd)
                 # Only the marker's own output may end a marked command. The
                 # shell echoes the command line that prints it, and that echo
                 # contains the marker text as well, so matching the bare
@@ -649,10 +721,6 @@ class RemoteShell:
                 lines = [x.strip() for x in text.split('\n') if x.strip() != '']
                 if len(lines) > 0:
                     last_line = lines[-1].strip()
-
-                self.msfshell = self.check_metasploit_shell(text)
-                if self.msfshell and 'exit' in cmd:
-                    self.msfshell = False
 
                 # A completion marker was sent for this command, so only the
                 # marker (checked at the top of the loop) may end it; a line
@@ -676,7 +744,13 @@ class RemoteShell:
                 # that had already finished (their full output was in the
                 # observation, followed by a Ctrl+C). Only a shell that has gone
                 # *quiet* with a prompt-like last line is actually stuck.
-                if quiet and _looks_like_interactive_prompt(last_line):
+                # A program waiting for input has printed its prompt without a
+                # line break (`Password: `, `msf6 >`, the shell prompt itself),
+                # while finished output ends with one. Requiring that shape
+                # keeps a command that printed `host:` or `waiting:` and is
+                # still working from being interrupted before its budget.
+                if (quiet and not text.endswith('\n')
+                        and _looks_like_interactive_prompt(last_line)):
                     stuck_polls += 1
                 elif not quiet:
                     stuck_polls = 0
@@ -760,13 +834,13 @@ class RemoteShell:
                 if not quiet:
                     out = out + received_data
 
-                if self.msfshell:
-                    out = f'{out}\nmeterpreter >'
-                    break
-
-        if self.msfshell:
-            # Drop the echoed command line, keeping only the session output.
-            separator = '^J' if '^J' in out else '\n'
-            out = '\n'.join(out.split(separator)[1:])
-
-        return self._clean(out, marker, marker_command)
+        out = self._clean(out, marker, marker_command)
+        if self.session_kind == METERPRETER_SESSION:
+            # A meterpreter session is not a shell, so it never prints a shell
+            # prompt of its own: its prompt is added here, and it is what tells
+            # the agent -- and the driver's hint -- that the next command runs
+            # on the target. A command-shell session prints its prompt itself,
+            # so nothing is fabricated for it: a `meterpreter >` there
+            # advertised commands that shell cannot run.
+            out = f'{out}\nmeterpreter >'
+        return out
