@@ -239,19 +239,20 @@ def test_driver_appends_hint_to_host_key_prompts():
     assert "host-key prompt" in out
 
 
-def test_driver_appends_the_msf_hint_to_a_meterpreter_prompt():
-    """A session prompt must say where the agent's next command runs.
+def test_driver_appends_the_session_hint_when_a_session_holds_the_shell():
+    """A session puts the agent's next command on the target, not on Kali.
 
-    The shell layer labels a Metasploit session `meterpreter >`, which names
-    neither `msf` nor `msfconsole`. The hint used to call it an interactive
-    msfconsole, so a run that already held a shell on the target kept sending
-    msfconsole commands that the session answered with `msfconsole: not found`
-    instead of reading the flag. The prompt is a session on the target, and the
-    hint now says so.
+    The hint comes from the session the shell reports, not from prompt text: a
+    command-shell session shows only the target's own prompt, which names
+    neither `msf` nor `msfconsole`. The hint used to call any session an
+    interactive msfconsole, so a run that already held a shell on the target
+    kept sending msfconsole commands that the session answered with
+    `msfconsole: not found` instead of reading the flag.
     """
     driver = PentestDriver("task", "flag", "target")
     shell = Mock()
-    shell.execute_cmd.return_value = "Command shell session 1 opened\nmeterpreter >"
+    shell.session_kind = "shell"
+    shell.execute_cmd.return_value = "uid=0(root)"
     driver.remotes["192.168.1.10"] = shell
 
     out, _ = driver.step(
@@ -266,7 +267,8 @@ def test_driver_appends_the_msf_hint_to_a_meterpreter_prompt():
 def test_driver_keeps_the_msfconsole_hint_for_an_msfconsole_prompt():
     driver = PentestDriver("task", "flag", "target")
     shell = Mock()
-    shell.execute_cmd.return_value = "meterpreter session 1 opened\nmsf6 >"
+    shell.session_kind = None
+    shell.execute_cmd.return_value = "msf6 >"
     driver.remotes["192.168.1.10"] = shell
 
     out, _ = driver.step(
@@ -274,6 +276,23 @@ def test_driver_keeps_the_msfconsole_hint_for_an_msfconsole_prompt():
     )
 
     assert "interactive msfconsole" in out
+
+
+def test_driver_reports_no_session_once_the_session_is_gone():
+    """The hint must not outlive the session it describes."""
+    driver = PentestDriver("task", "flag", "target")
+    shell = Mock()
+    shell.session_kind = "shell"
+    shell.execute_cmd.return_value = "uid=0(root)"
+    driver.remotes["192.168.1.10"] = shell
+    driver.step(ExecuteBash(machine_ipaddr="192.168.1.10", cmd="id"))
+
+    shell.session_kind = None
+    out, _ = driver.step(
+        ExecuteBash(machine_ipaddr="192.168.1.10", cmd="echo back-on-kali")
+    )
+
+    assert "session on the target" not in out
 
 
 def test_driver_reraises_the_action_timeout_instead_of_observing_it(monkeypatch):
