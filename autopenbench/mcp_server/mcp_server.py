@@ -65,6 +65,12 @@ def create_mcp_server(task: str, flag: str, target: str) -> MCPServer:
             return _NO_SESSION_MESSAGE, False
         try:
             return driver.step(tool)
+        except TimeoutError:
+            # The caller's own action budget expiring (the runner raises it
+            # from a SIGALRM handler inside the call). Reported as text it
+            # would be scored as the agent's own action instead of an action
+            # timeout, so it is passed through for the caller to classify.
+            raise
         except Exception as e:
             return f"{error_label}: {e!s}", False
 

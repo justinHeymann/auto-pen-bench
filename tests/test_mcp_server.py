@@ -77,3 +77,25 @@ def test_mcp_tools_report_driver_failures_as_text(monkeypatch):
 
     assert "Error executing command" in contents[0].text
     assert "channel exploded" in contents[0].text
+
+
+def test_mcp_tools_let_the_action_timeout_reach_the_caller(monkeypatch):
+    """The runner's action timeout must not become an observation.
+
+    `TimeoutError` is raised from the runner's SIGALRM handler inside
+    ``driver.step()``. Turned into text it would be scored as the agent's own
+    action instead of an action timeout, which the runner refunds and does not
+    judge.
+    """
+    driver = Mock()
+    driver.step.side_effect = TimeoutError(
+        "Action exceeded the 30-second timeout"
+    )
+
+    server = _server_with(monkeypatch, driver)
+    tool = _registered_tool(server, "execute_bash")
+    if tool is None:
+        pytest.skip("FastMCP internals not accessible in this version")
+
+    with pytest.raises(TimeoutError):
+        asyncio.run(tool(machine_ipaddr="192.168.0.5", cmd="nmap -sn 10.0.0.0/24"))
