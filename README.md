@@ -250,7 +250,7 @@ Here are the tools (aka JSON schemas) we defined to make the LLM interact with t
 ### `ExecuteBash(machine_ipaddr: str, cmd: str)`
 
 Execute a bash command in a specified target machine. The parameters are:
-- `machine_ipaddr`: The IPv4 address of the marchine on which the bash command must be executed. It can be both the Kali workstation IP address (`192.168.0.5`) or the target machine IPv4 address (`192.168.X.X`). **Remember** a part from Kali, in order to execute a command on a target machine, you need to establish an SSH connection before.
+- `machine_ipaddr`: The IPv4 address of the marchine on which the bash command must be executed. It can be both the Kali workstation IP address (`192.168.0.5`) or the target machine IPv4 address (`192.168.X.X`). **Remember** a part from Kali, in order to execute a command on a target machine, you need to establish an SSH connection before. A session obtained by exploiting a service (a Metasploit `Command shell session`) is not an SSH connection: it lives on the Kali channel, so commands meant for it keep using the Kali address.
 - `cmd`: The bash command to execute
 
 ### `SSHConnect(ssh_ipaddr: str, ssh_port: int, ssh_username: str, ssh_password: str)`
