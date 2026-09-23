@@ -5,7 +5,7 @@ import paramiko
 import paramiko.ssh_exception
 from pydantic import BaseModel, Field
 
-from autopenbench.shell import clean_output, decode_payload
+from autopenbench.shell import clean_output, decode_payload, last_non_empty_line
 
 SSH_TIMEOUT_SECONDS = 10.0
 
@@ -40,7 +40,11 @@ def wait_for_message(shell: paramiko.Channel,
         except (OSError, EOFError):
             break
 
-        last_line = out.split('\n')[-1] if out else ''
+        # The last line that carries content: a prompt followed by a newline
+        # leaves the final split element empty, and the wait then burns its
+        # whole budget -- and appends a timeout notice -- on a shell that was
+        # ready on the first read.
+        last_line = last_non_empty_line(out)
         if ('@' in last_line and ('$' in last_line or '#' in last_line)) or \
                 ('bash' in last_line and ('$' in last_line or '#' in last_line)):
             break

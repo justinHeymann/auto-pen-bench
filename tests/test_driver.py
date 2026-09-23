@@ -278,6 +278,88 @@ def test_driver_keeps_the_msfconsole_hint_for_an_msfconsole_prompt():
     assert "interactive msfconsole" in out
 
 
+def test_driver_appends_the_msfconsole_hint_when_the_output_ends_with_a_newline():
+    """A real observation ends with a newline, and the hint must still fire.
+
+    The hint was read off `out.split('\\n')[-1]`, which is the empty string for
+    every ordinary channel, so the cue never reached the agent: runs that had
+    typed a bare `msfconsole` sat inside the console for the rest of the step
+    budget issuing `msfconsole -x ...`, which the console answers with
+    'msfconsole cannot be run inside msfconsole'.
+    """
+    driver = PentestDriver("task", "flag", "target")
+    shell = Mock()
+    shell.session_kind = None
+    shell.execute_cmd.return_value = (
+        "nmap -sn 192.168.5.0/24\n"
+        "Nmap done: 256 IP addresses (1 host up) scanned in 9.75 seconds\n"
+        "msf auxiliary(gather/x) > \n"
+    )
+    driver.remotes["192.168.1.10"] = shell
+
+    out, _ = driver.step(
+        ExecuteBash(machine_ipaddr="192.168.1.10", cmd="nmap -sn 192.168.5.0/24")
+    )
+
+    assert "interactive msfconsole" in out
+    assert "exit" in out
+
+
+def test_driver_does_not_call_a_mention_of_msfconsole_a_console():
+    """`msf` in the last line is not a console waiting for a command."""
+    driver = PentestDriver("task", "flag", "target")
+    shell = Mock()
+    shell.session_kind = None
+    shell.execute_cmd.return_value = "sh: 4: msfconsole: not found"
+    driver.remotes["192.168.1.10"] = shell
+
+    out, _ = driver.step(
+        ExecuteBash(machine_ipaddr="192.168.1.10", cmd="msfconsole -q")
+    )
+
+    assert "interactive msfconsole" not in out
+
+
+def test_driver_appends_the_password_hint_when_the_prompt_is_the_last_line():
+    """The `password:` half of the hint has the same trailing-newline trap."""
+    driver = PentestDriver("task", "flag", "target")
+    shell = Mock()
+    shell.session_kind = None
+    shell.execute_cmd.return_value = "Password: \n"
+    driver.remotes["192.168.1.10"] = shell
+
+    out, _ = driver.step(
+        ExecuteBash(machine_ipaddr="192.168.1.10", cmd="su - root")
+    )
+
+    assert "interactive shell" in out
+    assert "provide the password" in out
+
+
+def test_driver_session_hint_keeps_the_target_reachable_through_kali():
+    """The hint must name the controller address the runner accepts.
+
+    An exploited session is reached through the Kali shell, so the runner only
+    accepts `machine_ipaddr` of Kali (or of a host reached by SSHConnect) while
+    it is open. The hint used to say only that commands now run on the target,
+    which invited the agent to pass the target's own address -- rejected as
+    'ExecuteBash requires Kali or the currently connected target', four times in
+    the runs that hold a session.
+    """
+    driver = PentestDriver("task", "flag", "target")
+    shell = Mock()
+    shell.session_kind = "shell"
+    shell.execute_cmd.return_value = "Command shell session 1 opened"
+    driver.remotes["192.168.1.10"] = shell
+
+    out, _ = driver.step(
+        ExecuteBash(machine_ipaddr="192.168.1.10", cmd="run")
+    )
+
+    assert "session on the target" in out
+    assert f"machine_ipaddr={pentest_driver.KALI_IP}" in out
+
+
 def test_driver_reports_no_session_once_the_session_is_gone():
     """The hint must not outlive the session it describes."""
     driver = PentestDriver("task", "flag", "target")
