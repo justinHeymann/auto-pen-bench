@@ -292,6 +292,51 @@ def receive_data(shell: paramiko.Channel, timeout: float = 2.0):
     return decode_payload(data)  # Return the decoded text data
 
 
+def last_non_empty_line(text: str) -> str:
+    """The last line of ``text`` that carries content, stripped of padding.
+
+    A buffer that ends with a newline -- every ordinary observation -- has an
+    empty final element, so reading ``text.split('\\n')[-1]`` off it yields
+    nothing at all. Every prompt-driven decision needs the last line that
+    actually printed something.
+    """
+    for line in reversed(normalize_newlines(text).split('\n')):
+        stripped = line.strip()
+        if stripped:
+            return stripped
+    return ''
+
+
+# A Metasploit console prompt: ``msf >``, ``msf6 >`` or one of the module
+# contexts (``msf exploit(...) >``, ``msf auxiliary(...) >``). It is not a
+# shell prompt, but it does mean msfconsole has taken the channel back --
+# whatever it was running through the system shell has returned.
+_MSF_CONSOLE_PROMPT = re.compile(
+    r'(?:^|\s)msf6?(?:\s+[a-z_]+\([^)]*\))?\s*>')
+# msfconsole prints this just before running a console line through the
+# system shell (``[*] exec: nmap -sn ...``).
+_MSF_EXEC_PREFIX = '[*] exec:'
+
+
+def is_metasploit_prompt(line: str) -> bool:
+    """True when ``line`` is a Metasploit console prompt or its exec banner.
+
+    The console reaches back to the agent as ``msf >``, ``msf6 >`` or a module
+    context such as ``msf auxiliary(...) >``, and it prints ``[*] exec:``
+    right before running a console line through the system shell. None of
+    those is a shell prompt, but each one means the command that was running
+    has returned and msfconsole is ready for its next command.
+
+    A prompt *shape* is required, not a mention of the name: an output line
+    like ``sh: msfconsole: not found`` contains ``msf`` without meaning a
+    console is waiting for input.
+    """
+    if not line:
+        return False
+    return bool(_MSF_CONSOLE_PROMPT.search(line)) or line.startswith(
+        _MSF_EXEC_PREFIX)
+
+
 def _asks_for_sudo_password(text: str) -> bool:
     """True when the output's last line is a sudo password prompt.
 
@@ -299,11 +344,10 @@ def _asks_for_sudo_password(text: str) -> bool:
     command that merely *mentions* a password (``sudo grep password
     /etc/shadow``) must not end the wait before the real prompt arrives.
     """
-    lines = [line.strip() for line in normalize_newlines(text).split('\n')
-             if line.strip()]
-    if not lines:
+    last = last_non_empty_line(text)
+    if not last:
         return False
-    last = lines[-1].lower()
+    last = last.lower()
     return 'password for' in last or last.endswith('password:')
 
 
@@ -316,11 +360,9 @@ def _is_shell_prompt(text: str) -> bool:
     ``user@host`` prompt, or a single bare token), not the tail of the
     command's own output.
     """
-    lines = [line.strip() for line in normalize_newlines(text).split('\n')
-             if line.strip()]
-    if not lines:
+    last = last_non_empty_line(text)
+    if not last:
         return False
-    last = lines[-1]
     return last.endswith(('$', '#')) and ('@' in last or ' ' not in last)
 
 
@@ -517,6 +559,14 @@ class RemoteShell:
         itself, the marker simply stays queued like the one sent with the
         command, and the grace period expires into the ordinary give-up path.
 
+        A Metasploit console is the same situation one layer up: msfconsole
+        runs the console line through the system shell, so a command that
+        flushed the marker leaves the *console* prompt behind instead of a
+        shell prompt. Re-sending at that prompt works for the same reason --
+        msfconsole executes it through the shell like the first one -- and it
+        is what keeps a finished `nmap` typed at an msf prompt from being
+        reported as a lost step although its scan report is already in hand.
+
         It is attempted at most once per command, and only as a last resort
         before that path.
 
@@ -529,7 +579,10 @@ class RemoteShell:
             bool: True if the marker was re-sent, i.e. the caller should keep
                 polling for it instead of giving up on the command.
         """
-        if marker is None or not _is_shell_prompt(out):
+        if marker is None:
+            return False
+        if not (_is_shell_prompt(out)
+                or is_metasploit_prompt(last_non_empty_line(out))):
             return False
         try:
             self.shell.send(f'{marker_command}\n')

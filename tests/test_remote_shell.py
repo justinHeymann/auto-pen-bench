@@ -18,6 +18,7 @@ from support import (
     EchoingShell,
     FakeShell,
     MarkerShell,
+    MsfConsoleShell,
     PromptShell,
     RunawayShell,
 )
@@ -185,6 +186,29 @@ def test_execute_cmd_recognises_a_marker_split_by_a_line_wrap():
     assert "probe-output" in out
     assert "interrupted" not in out
     assert "AUTOPENBENCH_DONE" not in out
+
+
+def test_execute_cmd_reprobes_the_marker_at_a_metasploit_prompt():
+    """A console line that flushed the marker is not a lost step.
+
+    The shipped incident: `nmap` typed at an `msf ... >` prompt flushed the
+    marker out of the PTY input queue, so the console prompt came back with
+    the complete scan report and no marker. The old code read that as an
+    interactive prompt and Ctrl+C'ed a finished command, marking the step
+    interrupted: the run refunded the step, never judged the nmap evidence,
+    and was told nothing. Re-sending the marker at the console prompt -- which
+    msfconsole executes through the shell like the first one -- is enough.
+    """
+    shell = MsfConsoleShell(body='Nmap scan report for 192.168.5.0\n'
+                                 'Nmap done: 256 IP addresses (1 host up)')
+
+    out = RemoteShell(shell).execute_cmd('nmap -sn 192.168.5.0/24')
+
+    assert 'Nmap done' in out
+    assert 'interrupted' not in out
+    assert '\x03' not in shell.sent
+    assert sum('AUTOPENBENCH_DONE' in sent for sent in shell.sent) == 2
+    assert 'AUTOPENBENCH_DONE' not in out
 
 
 def test_execute_cmd_times_out_when_marker_never_arrives(monkeypatch):
@@ -567,6 +591,42 @@ def test_is_shell_prompt_matches_prompts_but_not_output_lines():
     assert remote_shell_mod._is_shell_prompt("") is False
 
 
+def test_last_non_empty_line_ignores_the_trailing_newline():
+    """A buffer that ends with a newline has an empty final element.
+
+    Reading `text.split('\\n')[-1]` off an ordinary observation therefore
+    yields nothing, which is what made the driver's prompt hints dead code.
+    """
+    assert remote_shell_mod.last_non_empty_line('uid=0(root)\n') == 'uid=0(root)'
+    assert remote_shell_mod.last_non_empty_line('a\n\nmsf6 > \n') == 'msf6 >'
+    assert remote_shell_mod.last_non_empty_line('\n\n') == ''
+    assert remote_shell_mod.last_non_empty_line('') == ''
+
+
+def test_is_metasploit_prompt_matches_a_prompt_shape_not_a_mention():
+    """Only a console prompt means msfconsole is waiting for a command.
+
+    `msf` anywhere in the last line used to count, so a finished command's own
+    output (`sh: 4: msfconsole: not found`) was annotated as an interactive
+    msfconsole.
+    """
+    assert remote_shell_mod.is_metasploit_prompt('msf > ') is True
+    assert remote_shell_mod.is_metasploit_prompt('msf6 > ') is True
+    assert remote_shell_mod.is_metasploit_prompt(
+        'msf exploit(multi/http/x) > ') is True
+    assert remote_shell_mod.is_metasploit_prompt(
+        'msf auxiliary(gather/x) > printf "x"') is True
+    assert remote_shell_mod.is_metasploit_prompt('[*] exec: ') is True
+
+    assert remote_shell_mod.is_metasploit_prompt(
+        'sh: 4: msfconsole: not found') is False
+    assert remote_shell_mod.is_metasploit_prompt(
+        'msfvenom -p cmd/unix/reverse_bash > /tmp/x.elf') is False
+    assert remote_shell_mod.is_metasploit_prompt(
+        'uid=0(root)\nroot@kali:~#') is False
+    assert remote_shell_mod.is_metasploit_prompt('') is False
+
+
 def test_clean_output_strips_escapes_and_normalises_line_endings():
     raw = "a\r\n\x1b]3008;start=x;cwd=/root\x1b\\b\x1b[?2004hc\r\n"
 
@@ -578,6 +638,25 @@ def test_wait_for_message_detects_shell_prompt():
 
     out = wait_for_message(shell)
 
+    assert "root@kali" in out
+
+
+def test_wait_for_message_detects_a_prompt_that_ends_with_a_newline(monkeypatch):
+    """A prompt echoed with a trailing newline still means the shell is ready.
+
+    The check read `out.split('\\n')[-1]`, which is empty whenever the chunk
+    ends in a newline: the wait then ran out its full budget and appended a
+    timeout notice to a shell that had answered on the first read.
+    """
+    shell = FakeShell(output=b"Welcome\nroot@kali:~# \n")
+    ticks = itertools.count(0, 20)
+    monkeypatch.setattr(
+        "autopenbench.tools.ssh_connect.time.monotonic", lambda: next(ticks)
+    )
+
+    out = wait_for_message(shell)
+
+    assert "Timed out" not in out
     assert "root@kali" in out
 
 

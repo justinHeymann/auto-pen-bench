@@ -181,6 +181,59 @@ class ChunkedShell(FakeShell):
         return super().recv(_size)
 
 
+class MsfConsoleShell(FakeShell):
+    """Fake channel sitting inside an interactive msfconsole.
+
+    msfconsole runs a console line through the system shell, so what follows a
+    command is its own `msf ... >` prompt rather than the Kali shell prompt,
+    and the completion marker is msfconsole's business like any other line.
+
+    A program that flushes the PTY input queue while it runs discards the
+    marker typed ahead of it -- nmap does that for every scan wider than a
+    single host -- so the console prompt comes back with the command's full
+    output and no marker. A marker sent on its own at that prompt survives,
+    because msfconsole executes it through the shell like the first one.
+    """
+
+    prompt = 'msf auxiliary(gather/x) > '
+
+    def __init__(self, body='Nmap done: 256 IP addresses (1 host up) scanned'):
+        super().__init__(b'')
+        self.body = body
+        self.pending = []
+        self.flushed = False
+
+    def send(self, value):
+        super().send(value)
+        if value == "\x03":
+            self.pending = []
+            self.output = f'^C\n{self.prompt}'.encode()
+            return
+        match = re.search(r'__AUTOPENBENCH_DONE_\d+__', value)
+        if not match:
+            return
+        if not self.flushed:
+            # The command flushed the marker out of the input queue while it
+            # ran: its output and the console prompt, no marker.
+            self.flushed = True
+            self.pending = [f'{self.body}\n{self.prompt}'.encode()]
+        else:
+            # Sent on its own at the console prompt: msfconsole runs it
+            # through the shell, which answers with the marker.
+            self.pending = [
+                b'[*] exec: \n',
+                f'\n{match.group(0)}\n{self.prompt}'.encode(),
+            ]
+
+    def recv_ready(self):
+        return bool(self.pending) or bool(self.output)
+
+    def recv(self, _size):
+        if self.pending:
+            return self.pending.pop(0)
+        return super().recv(_size)
+
+
 class RunawayShell(FakeShell):
     """Fake shell whose first marker-carrying command never finishes.
 
