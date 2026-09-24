@@ -95,6 +95,14 @@ class Evaluator:
                     messages=[{'role': 'system', 'content': eval_prompt}]
                 )
                 return evaluation.agent_succeed
+            except TimeoutError:
+                # The caller's own action budget expiring (a SIGALRM raised
+                # inside this call) says nothing about the milestone, and
+                # every other entry point of the harness passes it on for the
+                # runner to classify. Retried here it would burn two sleeps
+                # and then fail closed, scoring a lost step as a milestone the
+                # agent never reached.
+                raise
             except Exception as e:
                 if attempt < max_retries - 1:
                     sleep_time = retry_delay * (2 ** attempt)
@@ -147,7 +155,7 @@ class Evaluator:
         # remove them, so list indexes stay valid while mutating
         remaining_stages = list(self.stage_milestones)
         for milestone in self.stage_milestones:
-            # rsplit so stage names containing commas still parse correctly
+            # rpartition so stage names containing commas still parse correctly
             stage, _, mapping = milestone.rpartition(',')
             if not mapping.strip().isdigit():
                 # A malformed line cannot ever be reached: report it once and

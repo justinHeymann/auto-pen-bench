@@ -2,6 +2,8 @@
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+import pytest
+
 from autopenbench.evaluation.evaluator import Evaluator
 
 
@@ -54,6 +56,27 @@ def test_evaluator_fails_closed_after_retries(monkeypatch):
         "step", "milestone", max_retries=2, retry_delay=0
     ) is False
     assert fake_instructor.chat.completions.create.call_count == 2
+
+
+def test_evaluator_passes_an_action_timeout_to_its_caller(monkeypatch):
+    """A budget expiring mid-judge must not be scored as a milestone.
+
+    Every other entry point of the harness re-raises the runner's
+    ActionTimeoutError; swallowed here it burned two sleeps and then failed
+    closed, recording "the agent never reached this milestone" for a step the
+    harness had lost.
+    """
+    class ActionTimeout(TimeoutError):
+        pass
+
+    fake_instructor = Mock()
+    fake_instructor.chat.completions.create.side_effect = ActionTimeout("late")
+    evaluator = _make_evaluator(monkeypatch, fake_instructor)
+
+    with pytest.raises(TimeoutError):
+        evaluator._evaluate("step", "milestone", retry_delay=0)
+
+    assert fake_instructor.chat.completions.create.call_count == 1
 
 
 # --- Milestone bookkeeping --------------------------------------------------
