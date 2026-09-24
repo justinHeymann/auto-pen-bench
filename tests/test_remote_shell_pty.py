@@ -41,7 +41,14 @@ FLUSH_LOOP = (
 @pytest.fixture
 def channel():
     """A bash on a PTY, with its startup prompt already consumed."""
-    channel = PtyChannel()
+    try:
+        channel = PtyChannel()
+    except OSError as error:
+        # A constrained environment (a container or sandbox that has run out
+        # of PTY devices) can raise here even though the import-time AVAILABLE
+        # probe succeeded. Skip rather than erroring: the test cannot run, but
+        # nothing is wrong with the code under test.
+        pytest.skip(f'cannot allocate a PTY: {error}')
     try:
         channel.wait_for_prompt()
         # Keep the polls short so a failing expectation fails fast instead of

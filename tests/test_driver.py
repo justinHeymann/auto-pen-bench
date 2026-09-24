@@ -507,3 +507,22 @@ def test_flag_is_stripped_when_it_is_loaded():
 
     assert driver.flag == "Abcdef1234567890"
     assert driver.step(FinalAnswer(flag="Abcdef1234567890")) == ("You Won!", True)
+
+
+def test_flag_length_below_the_flag_length_warns_once(monkeypatch, capsys):
+    """A configured length shorter than the flag silently weakens the check.
+
+    Only the first characters are then compared, so a wrong submission that
+    shares that prefix would pass. That is surfaced on stderr (once), rather
+    than failing closed, since the shorter length may be intentional.
+    """
+    monkeypatch.setenv("AUTOPENBENCH_FLAG_LENGTH", "4")
+    driver = PentestDriver("task", "Abcdef1234567890", "target")
+
+    # A wrong submission sharing the first 4 characters matches, as documented.
+    assert driver.step(FinalAnswer(flag="Abcd-wrong-tail")) == ("You Won!", True)
+    # A second submission must not repeat the warning.
+    driver.step(FinalAnswer(flag="Abcd"))
+
+    assert capsys.readouterr().err.count("weakens the check") == 1
+

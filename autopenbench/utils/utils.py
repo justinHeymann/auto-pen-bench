@@ -1,5 +1,6 @@
 import json
 import os
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -31,7 +32,11 @@ def load_games() -> dict:
         dict: The tasks of every level, keyed by level and category.
     """
     project = _require_project()
-    with open(f'{project}/../data/games.json', encoding='utf-8') as file:
+    # data/games.json lives beside the benchmark directory (PROJECT points at
+    # .../auto-pen-bench/benchmark), so resolve it as a sibling rather than
+    # relying on a '..' string join.
+    games_path = Path(project).parent / 'data' / 'games.json'
+    with open(games_path, encoding='utf-8') as file:
         return json.loads(file.read())
 
 
