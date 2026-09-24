@@ -1,4 +1,5 @@
 """The setup/ and scripts/ helpers used to build and prepare a run."""
+import itertools
 import json
 import subprocess
 import sys
@@ -112,6 +113,48 @@ def test_update_compose_keeps_the_category_octet(tmp_path):
     data = yaml.safe_load((category_dir / "docker-compose.yml").read_text())
     service = data["services"]["in-vitro_web_security_vm3"]
     assert service["networks"]["net-main_network"]["ipv4_address"] == "192.168.4.3"
+
+
+def test_update_compose_keeps_the_files_comments(tmp_path):
+    """A hand-written compose file must not be reformatted by `make create`.
+
+    The prompt-injection contract lives in the comments of that file, so a
+    yaml round-trip deletes the documentation along with the services it
+    describes.
+    """
+    if yaml is None:
+        pytest.skip("PyYAML not installed")
+    mdc = _manage_docker_compose()
+    category_dir = tmp_path / "machines" / "in-vitro" / "web_security"
+    category_dir.mkdir(parents=True)
+    compose_path = category_dir / "docker-compose.yml"
+    compose_path.write_text(
+        "services:\n"
+        "    # the original machine: keep this note\n"
+        "    in-vitro_web_security_vm0:\n"
+        "        networks:\n"
+        "            net-main_network:\n"
+        "                ipv4_address: 192.168.4.0\n"
+        "\n"
+        "# Network definition\n"
+        "networks:\n"
+        "    net-main_network:\n"
+        "        internal: true\n"
+    )
+
+    mdc.update_docker_compose(str(tmp_path), "in-vitro", "web_security", 3)
+
+    text = compose_path.read_text()
+    assert "# the original machine: keep this note" in text
+    assert "# Network definition" in text
+    data = yaml.safe_load(text)
+    # The new service belongs to services:, not after networks:.
+    assert list(data["services"]) == [
+        "in-vitro_web_security_vm0", "in-vitro_web_security_vm3"
+    ]
+    assert data["services"]["in-vitro_web_security_vm3"]["networks"][
+        "net-main_network"]["ipv4_address"] == "192.168.4.3"
+    assert data["networks"]["net-main_network"]["internal"] is True
 
 
 # --- scripts/randomize_flags.py ---------------------------------------------
@@ -233,6 +276,93 @@ def test_randomize_still_refuses_a_duplicate_from_an_unrelated_entry(
 
     assert mod.randomize(dry_run=False) == 0
     assert (vm_dir / "flag.txt").read_text() == token
+
+
+def test_a_variant_without_variant_of_does_not_freeze_its_original(
+        tmp_path, monkeypatch):
+    """The target suffix alone identifies a derived entry.
+
+    Counting only the `variant_of` key left the occurrence count mismatched
+    when a variant lost it, so the original was skipped on every run -- the
+    task could never be randomized again, silently.
+    """
+    mod = _randomize_flags()
+    token = "QnwieQY7t7MoxguK"
+    vm_dir, games, root, machines = _randomize_variant_fixture(tmp_path, token)
+    data = json.loads(games.read_text())
+    for entry in data["in-vitro"]["web_security"]:
+        entry.pop("variant_of", None)
+    games.write_text(json.dumps(data, indent=2))
+    _point_at_fixture(monkeypatch, mod, root, machines, games)
+
+    assert mod.randomize(dry_run=False) == 1
+
+    entries = json.loads(games.read_text())["in-vitro"]["web_security"]
+    flags = {entry["flag"] for entry in entries}
+    assert len(flags) == 1
+    assert (vm_dir / "flag.txt").read_text() == flags.pop()
+
+
+def test_randomize_writes_nothing_when_a_later_entry_fails(
+        tmp_path, monkeypatch):
+    """Flag files are staged, so an interrupted run leaves no half-state.
+
+    Written as it went, a run that died on a later entry left the first flag
+    files holding a token that games.json still called stale: the container
+    serves a flag the runner rejects, and the task is unsolvable.
+    """
+    mod = _randomize_flags()
+    machines = tmp_path / "benchmark" / "machines"
+    entries = []
+    for vmid, token in (("vm0", "A" * 16), ("vm1", "B" * 16)):
+        vm_dir = machines / "in-vitro" / "web_security" / vmid
+        vm_dir.mkdir(parents=True)
+        (vm_dir / "flag.txt").write_text(token)
+        entries.append(
+            {"target": f"in-vitro_web_security_{vmid}", "flag": token}
+        )
+    games = tmp_path / "data" / "games.json"
+    games.parent.mkdir()
+    games.write_text(json.dumps({"in-vitro": {"web_security": entries}}, indent=2))
+    _point_at_fixture(monkeypatch, mod, tmp_path, machines, games)
+
+    calls = itertools.count(1)
+
+    def _token(length):
+        if next(calls) > 1:
+            raise RuntimeError("disk on fire")
+        return "N" * length
+
+    monkeypatch.setattr(mod, "random_token", _token)
+
+    with pytest.raises(RuntimeError):
+        mod.randomize(dry_run=False)
+
+    assert (machines / "in-vitro" / "web_security" / "vm0" / "flag.txt").read_text() == "A" * 16
+    assert "A" * 16 in games.read_text()
+
+
+def test_randomize_rolls_back_when_the_games_commit_fails(tmp_path, monkeypatch):
+    """A failed final replacement cannot leave live flags out of sync."""
+    mod = _randomize_flags()
+    token = "QnwieQY7t7MoxguK"
+    vm_dir, games, root, machines = _randomize_variant_fixture(tmp_path, token)
+    _point_at_fixture(monkeypatch, mod, root, machines, games)
+    original_replace = mod.os.replace
+
+    def fail_games_replace(source, destination):
+        if destination == games:
+            raise OSError("simulated full disk")
+        return original_replace(source, destination)
+
+    monkeypatch.setattr(mod.os, "replace", fail_games_replace)
+
+    with pytest.raises(OSError):
+        mod.randomize(dry_run=False)
+
+    assert (vm_dir / "flag.txt").read_text() == token
+    assert token in games.read_text()
+    assert not (games.parent / ".randomize_flags-journal.json").exists()
 
 
 def test_randomize_skips_flag_that_appears_in_another_file(tmp_path, monkeypatch):
