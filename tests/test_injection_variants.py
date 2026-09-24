@@ -8,6 +8,7 @@ endpoint for the injected redirect/info-leak conditions — and, just as
 importantly, NOT for the baseline/sham ones.
 """
 
+import pytest
 from test_compose_orchestration import _stub_compose_env
 
 from autopenbench.driver import pentest_driver
@@ -34,38 +35,55 @@ def test_variant_names_resolve_to_the_category_compose_file(
         assert str(project / "machines" / "in-vitro" / "web_security") in up_cmd
 
 
-def test_restart_starts_the_collector_only_for_injected_redirect_infoleak(
-        monkeypatch, tmp_path):
+@pytest.mark.parametrize(
+    "target, collector",
+    [
+        ("in-vitro_web_security_vm1inj",
+         "in-vitro_web_security_vm1collector"),
+        ("in-vitro_web_security_vm2inj",
+         "in-vitro_web_security_vm2collector"),
+    ],
+)
+def test_restart_starts_the_collector_only_for_injected_endpoint_tasks(
+        monkeypatch, tmp_path, target, collector):
     _, _, run = _stub_compose_env(monkeypatch, tmp_path)
 
-    pentest_driver.restart_docker_compose_service(
-        "in-vitro_web_security_vm1inj")
+    pentest_driver.restart_docker_compose_service(target)
 
     assert run.call_count == 4
-    assert run.call_args_list[3].args[0][-1] == (
-        "in-vitro_web_security_vm1collector"
-    )
+    assert run.call_args_list[3].args[0][-1] == collector
 
 
+@pytest.mark.parametrize(
+    "target",
+    [
+        "in-vitro_web_security_vm1",
+        "in-vitro_web_security_vm1sham",
+        "in-vitro_web_security_vm2",
+        "in-vitro_web_security_vm2sham",
+        # vm0's payload has no endpoint at all, in any condition.
+        "in-vitro_web_security_vm0inj",
+    ],
+)
 def test_restart_starts_no_collector_for_baseline_or_sham(
-        monkeypatch, tmp_path):
+        monkeypatch, tmp_path, target):
     _, _, run = _stub_compose_env(monkeypatch, tmp_path)
 
     # down -> kali up -> target up; no fourth (sidecar) call.
-    pentest_driver.restart_docker_compose_service("in-vitro_web_security_vm1")
-    assert run.call_count == 3
-    run.reset_mock()
-    pentest_driver.restart_docker_compose_service(
-        "in-vitro_web_security_vm1sham")
+    pentest_driver.restart_docker_compose_service(target)
     assert run.call_count == 3
 
 
-def test_vm3_variants_keep_the_database_sidecar(monkeypatch, tmp_path):
+@pytest.mark.parametrize(
+    "target",
+    ["in-vitro_web_security_vm3sham", "in-vitro_web_security_vm3inj"],
+)
+def test_vm3_variants_keep_the_database_sidecar(monkeypatch, tmp_path, target):
     _, _, run = _stub_compose_env(monkeypatch, tmp_path)
 
-    pentest_driver.restart_docker_compose_service(
-        "in-vitro_web_security_vm3inj")
+    pentest_driver.restart_docker_compose_service(target)
 
+    assert run.call_count == 4
     assert run.call_args_list[3].args[0][-1] == (
         "in-vitro_web_security_vm3_database"
     )

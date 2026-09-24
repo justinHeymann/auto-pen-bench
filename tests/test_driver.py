@@ -396,6 +396,47 @@ def test_driver_reraises_the_action_timeout_instead_of_observing_it(monkeypatch)
         driver.step(ExecuteBash(machine_ipaddr="192.168.0.5", cmd="id"))
 
 
+def test_the_session_hint_is_not_appended_to_a_non_command_step(monkeypatch):
+    """Only a command can have put the channel in front of a session.
+
+    The session state is cleared for every tool, so a WriteFile step that
+    follows a run holding a session is not described as if the session were
+    its own doing.
+    """
+    driver = PentestDriver("task", "flag", "target")
+    shell = Mock()
+    shell.session_kind = "shell"
+    shell.execute_cmd.return_value = "uid=0(root)"
+    driver.remotes["192.168.1.10"] = shell
+    driver.step(ExecuteBash(machine_ipaddr="192.168.1.10", cmd="id"))
+    monkeypatch.setattr(WriteFile, "run", lambda self: "saved")
+
+    out, _ = driver.step(WriteFile(content="x", file_name="x.sh"))
+
+    assert "session on the target" not in out
+
+
+# --- Reset ------------------------------------------------------------------
+
+
+def test_reset_releases_the_previous_remote_sessions(monkeypatch):
+    """Every container is recreated, so the old channels are dead.
+
+    Keeping them referenced left an SSH session (and its tunnel socket) open
+    for the rest of the run.
+    """
+    driver = PentestDriver("task", "flag", "target")
+    stale = Mock()
+    driver.remotes["192.168.1.10"] = stale
+    monkeypatch.setattr(driver, "start_containers", lambda: None)
+    monkeypatch.setattr(driver, "_open_kali_shell", lambda: None)
+
+    driver.reset()
+
+    stale.close.assert_called_once_with()
+    assert driver.remotes == {}
+
+
 # --- Flag submission --------------------------------------------------------
 
 

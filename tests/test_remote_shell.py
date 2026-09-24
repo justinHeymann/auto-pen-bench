@@ -1,6 +1,7 @@
 """RemoteShell: the completion protocol, prompts and receive helpers."""
 import itertools
 import socket
+import time
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -273,6 +274,21 @@ def test_command_timeout_seconds_is_configurable(monkeypatch):
 # --- Commands that prompt for a password ------------------------------------
 
 
+def test_sudo_behind_a_shell_keyword_is_treated_as_a_password_prompt():
+    """`if sudo id; then ...` runs sudo, so it must not get the marker.
+
+    With the keyword taken for the program, the command was sent *with* the
+    completion marker. sudo reads that line as the password, so the command
+    can never finish normally and its observation desynchronises.
+    """
+    assert remote_shell_mod.may_prompt_for_password("if sudo id; then :; fi")
+    assert remote_shell_mod.may_prompt_for_password(
+        "while sudo id; do :; done"
+    )
+    # The program of a conditional is what the conditional runs.
+    assert remote_shell_mod._program_of(["if", "sudo", "id"]) == "sudo"
+
+
 def test_execute_cmd_sudo_uses_password_heuristic_without_marker(monkeypatch):
     # Answers the sent command with the sudo password prompt (a FakeShell's
     # canned output would be discarded by the pre-command drain instead).
@@ -478,6 +494,30 @@ def test_remote_shell_tracks_which_shell_the_session_put_it_in_front_of():
         "Meterpreter session 2 closed"
     ) is False
     assert remote_shell.session_kind is None
+
+
+def test_the_last_session_banner_in_one_observation_decides():
+    """`session 1 opened ... session 1 closed` in one chunk leaves no session.
+
+    A one-shot `msfconsole -x '... exit'` prints both banners in a single
+    observation. Reading only the first one left the driver telling the agent
+    that a session it had already left was the active shell.
+    """
+    remote_shell = RemoteShell(FakeShell())
+
+    assert remote_shell.check_metasploit_shell(
+        "\x1b[?2004lCommand shell session 1 opened (192.168.0.5:4444)\n"
+        "uid=0(root)\n"
+        "Command shell session 1 closed. Reason: User exit\n"
+    ) is False
+    assert remote_shell.session_kind is None
+
+    # ... and the other way round: the session that is open at the end is the
+    # one the driver must describe.
+    assert remote_shell.check_metasploit_shell(
+        "Command shell session 2 closed\nMeterpreter session 3 opened"
+    ) is True
+    assert remote_shell.session_kind == remote_shell_mod.METERPRETER_SESSION
 
 
 def test_the_session_banner_is_seen_behind_the_images_hook_sequences():
@@ -759,6 +799,57 @@ def test_receive_data_falls_back_when_chardet_cannot_decide(monkeypatch):
 
     assert isinstance(out, str)
     assert "A" in out
+
+
+def test_receive_data_does_not_outlive_its_own_timeout():
+    """A silent channel must not cost more than the poll's budget.
+
+    The channel's socket timeout is what makes ``recv`` return, so a channel
+    left at its own (5 s) timeout made a 1 s poll block for 5 s -- enough for
+    a command to overshoot the runner's 30 s action timeout, which is the one
+    thing the command budget exists to prevent.
+    """
+
+    class SilentShell:
+        """A channel that answers only with a timeout."""
+
+        def __init__(self):
+            self.timeouts = []
+
+        def settimeout(self, timeout):
+            self.timeouts.append(timeout)
+
+        def recv(self, _size):
+            time.sleep(self.timeouts[-1] if self.timeouts else 5.0)
+            raise TimeoutError
+
+    shell = SilentShell()
+    started = time.monotonic()
+
+    assert receive_data(shell, timeout=0.3) == ""
+
+    assert time.monotonic() - started < 1.0
+    # Every read is bounded by the remaining budget; the last value is the
+    # restoration (this fake has no gettimeout to read it from).
+    assert all(
+        timeout is None or 0 <= timeout <= 0.3 for timeout in shell.timeouts
+    )
+
+
+def test_receive_data_restores_the_channel_timeout():
+    """paramiko's channel timeout bounds send() as well as recv().
+
+    Left at the (possibly zero) remaining budget, the next write would fail
+    with socket.timeout instead of waiting for the SSH send window -- the
+    channel must come back with the timeout it had.
+    """
+    shell = FakeShell(output=b"ready\n")
+    shell.settimeout(5.0)
+    shell.gettimeout = lambda: shell.timeout
+
+    assert receive_data(shell, timeout=0.3) == "ready\n"
+
+    assert shell.timeout == 5.0
 
 
 def test_receive_data_times_out(monkeypatch):
