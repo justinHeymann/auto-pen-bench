@@ -146,6 +146,95 @@ def _point_at_fixture(monkeypatch, mod, root, machines, games):
     monkeypatch.setattr(mod, "GAMES_PATH", games)
 
 
+def _randomize_variant_fixture(tmp_path, token, extra_entries=()):
+    """A VM whose flag is repeated by its injection variant entries."""
+    level, category, vmid = "in-vitro", "web_security", "vm0"
+    machines = tmp_path / "benchmark" / "machines"
+    vm_dir = machines / level / category / vmid
+    vm_dir.mkdir(parents=True)
+    (vm_dir / "flag.txt").write_text(token)
+
+    base_target = f"{level}_{category}_{vmid}"
+    entries = [{"target": base_target, "flag": token}]
+    for suffix, condition in (("sham", "sham"), ("inj", "injected")):
+        entries.append({
+            "target": f"{base_target}{suffix}",
+            "flag": token,
+            "variant_of": base_target,
+            "condition": condition,
+        })
+    entries.extend(extra_entries)
+
+    games = tmp_path / "data" / "games.json"
+    games.parent.mkdir()
+    games.write_text(json.dumps({level: {category: entries}}, indent=2))
+    return vm_dir, games, tmp_path, machines
+
+
+def test_randomize_updates_variants_together_with_their_original(tmp_path, monkeypatch):
+    """A variant deliberately repeats its original's flag.
+
+    Regression guard: that duplicate used to trip the "flag must appear
+    exactly once in games.json" check, so the original could no longer be
+    randomized at all. All three entries and the mounted flag file must move
+    together.
+    """
+    mod = _randomize_flags()
+    token = "QnwieQY7t7MoxguK"
+    vm_dir, games, root, machines = _randomize_variant_fixture(tmp_path, token)
+    _point_at_fixture(monkeypatch, mod, root, machines, games)
+
+    assert mod.randomize(dry_run=False) == 1
+
+    entries = json.loads(games.read_text())["in-vitro"]["web_security"]
+    flags = {entry["flag"] for entry in entries}
+    assert len(flags) == 1, f"entries disagree on the flag: {flags}"
+    new_flag = flags.pop()
+    assert new_flag != token
+    assert len(new_flag) == len(token)
+    # Both the original and every variant now serve the new flag.
+    assert (vm_dir / "flag.txt").read_text() == new_flag
+
+
+def test_randomize_skips_a_variant_entry_as_derived(tmp_path, monkeypatch, capsys):
+    """A variant on its own is recognized, not reported as a bad target."""
+    mod = _randomize_flags()
+    token = "QnwieQY7t7MoxguK"
+    vm_dir, games, root, machines = _randomize_variant_fixture(tmp_path, token)
+    # Only the variant entries remain: randomizing one alone would desync it
+    # from the flag file it mounts.
+    data = json.loads(games.read_text())
+    data["in-vitro"]["web_security"] = [
+        entry for entry in data["in-vitro"]["web_security"]
+        if entry.get("variant_of")
+    ]
+    games.write_text(json.dumps(data, indent=2))
+    _point_at_fixture(monkeypatch, mod, root, machines, games)
+
+    assert mod.randomize(dry_run=False) == 0
+
+    output = capsys.readouterr().out
+    assert "unrecognized target format" not in output
+    assert "injection variant of in-vitro_web_security_vm0" in output
+    assert (vm_dir / "flag.txt").read_text() == token
+
+
+def test_randomize_still_refuses_a_duplicate_from_an_unrelated_entry(
+        tmp_path, monkeypatch):
+    """The occurrence count must not become a licence to rewrite anything
+    that happens to share the token: only declared variants are expected."""
+    mod = _randomize_flags()
+    token = "QnwieQY7t7MoxguK"
+    vm_dir, games, root, machines = _randomize_variant_fixture(
+        tmp_path, token,
+        extra_entries=[{"target": "in-vitro_web_security_vm9", "flag": token}],
+    )
+    _point_at_fixture(monkeypatch, mod, root, machines, games)
+
+    assert mod.randomize(dry_run=False) == 0
+    assert (vm_dir / "flag.txt").read_text() == token
+
+
 def test_randomize_skips_flag_that_appears_in_another_file(tmp_path, monkeypatch):
     """The Heartbleed VM's flag is a slice of its private key.
 

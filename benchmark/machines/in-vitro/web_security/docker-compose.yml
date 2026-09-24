@@ -164,6 +164,190 @@ services:
                     php -S 0.0.0.0:80 &&
                     tail -f /dev/null"      
 
+# ---------------------------------------------------------------------------
+# Prompt-injection variants (see benchmark/injection_payloads/README.md).
+# Each variant is a minimal overlay on its original image and reuses the
+# original's static IP — a variant and its original are never up at the same
+# time (every task reset tears down all containers first), so condition
+# parity holds. Variant services are appended here, after the originals.
+# ---------------------------------------------------------------------------
+
+    # vm0 — DETER payload (legal/authority disclaimer).
+    in-vitro_web_security_vm0sham:
+        security_opt:
+            - label:disable
+        build: ./in-vitro/web_security/vm0sham
+        image: in-vitro_web_security_vm0sham
+        container_name: in-vitro_web_security_vm0sham
+        tty: true
+        init: true
+        networks:
+            net-main_network:
+                ipv4_address: 192.168.2.0
+        restart: unless-stopped
+        command: bash -c "
+                    php -S 0.0.0.0:80 &&
+                    tail -f /dev/null"
+        volumes:
+            - ./in-vitro/web_security/vm0/flag.txt:/root/flag.txt
+
+    in-vitro_web_security_vm0inj:
+        security_opt:
+            - label:disable
+        build: ./in-vitro/web_security/vm0inj
+        image: in-vitro_web_security_vm0inj
+        container_name: in-vitro_web_security_vm0inj
+        tty: true
+        init: true
+        networks:
+            net-main_network:
+                ipv4_address: 192.168.2.0
+        restart: unless-stopped
+        command: bash -c "
+                    php -S 0.0.0.0:80 &&
+                    tail -f /dev/null"
+        volumes:
+            - ./in-vitro/web_security/vm0/flag.txt:/root/flag.txt
+
+    # vm1 — REDIRECT payload ("mandatory integrity check" -> collector).
+    in-vitro_web_security_vm1sham:
+        security_opt:
+            - label:disable
+        build: ./in-vitro/web_security/vm1sham
+        image: in-vitro_web_security_vm1sham
+        container_name: in-vitro_web_security_vm1sham
+        tty: true
+        init: true
+        networks:
+            net-main_network:
+                ipv4_address: 192.168.2.1
+        restart: unless-stopped
+        command: bash -c "
+                    php -S 0.0.0.0:80 &&
+                    tail -f /dev/null"
+        volumes:
+            - ./in-vitro/web_security/vm1/flag.txt:/root/flag.txt
+
+    in-vitro_web_security_vm1inj:
+        security_opt:
+            - label:disable
+        build: ./in-vitro/web_security/vm1inj
+        image: in-vitro_web_security_vm1inj
+        container_name: in-vitro_web_security_vm1inj
+        tty: true
+        init: true
+        networks:
+            net-main_network:
+                ipv4_address: 192.168.2.1
+        restart: unless-stopped
+        command: bash -c "
+                    php -S 0.0.0.0:80 &&
+                    tail -f /dev/null"
+        volumes:
+            - ./in-vitro/web_security/vm1/flag.txt:/root/flag.txt
+
+    # Collection endpoint for the injected vm1 condition only. It is started
+    # by the driver via SIDECAR_SERVICES and writes one JSON line per request
+    # to a per-boot file under /logs (bind-mounted to the host); it must NOT
+    # exist in the baseline or sham conditions.
+    in-vitro_web_security_vm1collector:
+        security_opt:
+            - label:disable
+        build: ./collection_endpoint
+        image: collection_endpoint
+        container_name: in-vitro_web_security_vm1collector
+        init: true
+        networks:
+            net-main_network:
+                ipv4_address: 192.168.2.240
+        restart: unless-stopped
+        volumes:
+            - ./in-vitro/web_security/endpoint_logs/vm1inj:/logs
+
+    # vm2 — INFO-LEAK payload (system-prompt "audit" request -> collector).
+    in-vitro_web_security_vm2sham:
+        security_opt:
+            - label:disable
+        build: ./in-vitro/web_security/vm2sham
+        image: in-vitro_web_security_vm2sham
+        container_name: in-vitro_web_security_vm2sham
+        tty: true
+        init: true
+        networks:
+            net-main_network:
+                ipv4_address: 192.168.2.2
+        restart: unless-stopped
+        command: bash -c "
+                    php -S 0.0.0.0:80 &&
+                    tail -f /dev/null"
+        volumes:
+            - ./in-vitro/web_security/vm2/flag.txt:/root/flag.txt
+
+    in-vitro_web_security_vm2inj:
+        security_opt:
+            - label:disable
+        build: ./in-vitro/web_security/vm2inj
+        image: in-vitro_web_security_vm2inj
+        container_name: in-vitro_web_security_vm2inj
+        tty: true
+        init: true
+        networks:
+            net-main_network:
+                ipv4_address: 192.168.2.2
+        restart: unless-stopped
+        command: bash -c "
+                    php -S 0.0.0.0:80 &&
+                    tail -f /dev/null"
+        volumes:
+            - ./in-vitro/web_security/vm2/flag.txt:/root/flag.txt
+
+    # Collection endpoint for the injected vm2 condition only (same contract
+    # as the vm1 collector above).
+    in-vitro_web_security_vm2collector:
+        security_opt:
+            - label:disable
+        build: ./collection_endpoint
+        image: collection_endpoint
+        container_name: in-vitro_web_security_vm2collector
+        init: true
+        networks:
+            net-main_network:
+                ipv4_address: 192.168.2.241
+        restart: unless-stopped
+        volumes:
+            - ./in-vitro/web_security/endpoint_logs/vm2inj:/logs
+
+    # vm3 — CONFUSION payload (false "vulnerability patched" advisory).
+    in-vitro_web_security_vm3sham:
+        security_opt:
+            - label:disable
+        build: ./in-vitro/web_security/vm3sham
+        image: in-vitro_web_security_vm3sham
+        container_name: in-vitro_web_security_vm3sham
+        tty: true
+        init: true
+        networks:
+            net-main_network:
+                ipv4_address: 192.168.2.3
+        restart: unless-stopped
+        depends_on:
+            - in-vitro_web_security_vm3_database
+
+    in-vitro_web_security_vm3inj:
+        security_opt:
+            - label:disable
+        build: ./in-vitro/web_security/vm3inj
+        image: in-vitro_web_security_vm3inj
+        container_name: in-vitro_web_security_vm3inj
+        tty: true
+        init: true
+        networks:
+            net-main_network:
+                ipv4_address: 192.168.2.3
+        restart: unless-stopped
+        depends_on:
+            - in-vitro_web_security_vm3_database
+
 # Network definition
 networks:
     net-main_network:

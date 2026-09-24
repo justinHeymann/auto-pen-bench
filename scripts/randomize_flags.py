@@ -20,6 +20,14 @@ This script:
 Entries whose current flag doesn't look like a simple random token are left
 untouched, since those would need bespoke handling to regenerate safely.
 
+The prompt-injection variants (``benchmark/injection_payloads/``) are
+*derived* tasks: ``in-vitro_web_security_vm0inj`` mounts the same flag file
+as ``in-vitro_web_security_vm0`` and its games.json entry intentionally
+repeats that flag, so a variant is never randomized on its own -- it is
+rewritten together with the original it declares in ``variant_of``. That is
+also why the ``exactly once`` guard counts the expected occurrences (the
+original plus its variants) instead of assuming a single one.
+
 Run this before a benchmark session to avoid reusing flags that may already
 be memorized by a model from public benchmark data:
 
@@ -38,8 +46,12 @@ GAMES_PATH = REPO_ROOT / 'data' / 'games.json'
 
 # Only regenerate flags that already look like a plain random token.
 SIMPLE_TOKEN_RE = re.compile(r'^[A-Za-z0-9]{8,64}$')
-# e.g. "in-vitro_access_control_vm0" -> level, category, vmid
-TARGET_RE = re.compile(r'^(in-vitro|real-world)_(.+)_(vm\d+[ab]?)$')
+# e.g. "in-vitro_access_control_vm0" -> level, category, vmid. The injection
+# variants append a suffix without an underscore (vm0sham/vm0inj) so the
+# driver's own name parser still resolves their category compose file.
+TARGET_RE = re.compile(r'^(in-vitro|real-world)_(.+)_(vm\d+[ab]?)(sham|inj)?$')
+# Suffix that marks a derived (injection variant) target.
+VARIANT_SUFFIXES = ('sham', 'inj')
 FLAG_FILENAMES = ('flag', 'flag.txt')
 
 # Files larger than this are not scanned for a duplicate flag token.
@@ -85,6 +97,22 @@ def random_token(length: int) -> str:
     return ''.join(secrets.choice(alphabet) for _ in range(length))
 
 
+def variant_counts(games: dict) -> dict:
+    """How many entries each target has declaring it as their ``variant_of``.
+
+    A derived entry repeats its original's flag by design, so the number of
+    occurrences of a flag in games.json is ``1 + variants`` rather than 1.
+    """
+    counts = {}
+    for categories in games.values():
+        for entries in categories.values():
+            for entry in entries:
+                original = entry.get('variant_of')
+                if original:
+                    counts[original] = counts.get(original, 0) + 1
+    return counts
+
+
 def randomize(dry_run: bool = False) -> int:
     # Parse existing file (preserve hand-formatted spacing if present)
     raw_games_text = GAMES_PATH.read_text(encoding='utf-8')
@@ -97,6 +125,7 @@ def randomize(dry_run: bool = False) -> int:
     changed = 0
     skipped = 0
     new_games_text = raw_games_text
+    variants = variant_counts(games)
 
     for level, categories in list(games.items()):
         for entries in list(categories.values()):
@@ -112,7 +141,17 @@ def randomize(dry_run: bool = False) -> int:
                     skipped += 1
                     continue
 
-                _, parsed_category, vmid = match.groups()
+                _, parsed_category, vmid, variant_suffix = match.groups()
+                if variant_suffix or entry.get('variant_of'):
+                    # Derived entries share their original's flag: randomizing
+                    # one on its own would desync it from the flag file it
+                    # mounts and from its sibling conditions.
+                    original = entry.get('variant_of', '(no variant_of)')
+                    print(f'[skip] {target}: injection variant of {original}; '
+                          'updated together with its original')
+                    skipped += 1
+                    continue
+
                 flag_path = find_flag_file(level, parsed_category, vmid)
                 old_flag = entry.get('flag', '')
 
@@ -143,7 +182,10 @@ def randomize(dry_run: bool = False) -> int:
                 # file's existing formatting. Match the flag value in a
                 # format-agnostic way (tolerates whitespace after ':') so
                 # the script works on both hand-formatted and json.dump-ed
-                # games.json files.
+                # games.json files. The expected count includes the derived
+                # entries that repeat this flag (the original + its variants),
+                # so a stray duplicate still aborts.
+                expected = 1 + variants.get(target, 0)
                 new_flag = random_token(len(old_flag))
                 flag_re = re.compile(
                     r'("flag"\s*:\s*")' + re.escape(old_flag) + r'(")'
@@ -152,15 +194,18 @@ def randomize(dry_run: bool = False) -> int:
                     lambda m, new_flag=new_flag: m.group(1) + new_flag + m.group(2),
                     raw_games_text,
                 )
-                if n_replaced != 1:
-                    print(f'[skip] {target}: flag not found exactly once in '
-                          'games.json, leaving untouched')
+                if n_replaced != expected:
+                    print(f'[skip] {target}: flag appears {n_replaced} time(s) '
+                          f'in games.json, expected {expected}; leaving untouched')
                     skipped += 1
                     continue
                 raw_games_text = new_games_text
 
                 relpath = flag_path.relative_to(REPO_ROOT)
-                print(f'[ok]   {target}: {old_flag} -> {new_flag} ({relpath})')
+                derived = expected - 1
+                print(f'[ok]   {target}: {old_flag} -> {new_flag} ({relpath})'
+                      + (f' + {derived} derived entr'
+                         f'{"y" if derived == 1 else "ies"}' if derived else ''))
                 if not dry_run:
                     flag_path.write_text(
                         raw_flag_file.replace(old_flag, new_flag),

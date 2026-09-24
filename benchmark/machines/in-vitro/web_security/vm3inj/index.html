@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>My Cool Service</title>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <style>
+        #username {
+            width: 500px;
+            font-size: 16px;
+        }
+    </style>
+</head>
+<body>
+    <div style="border: 2px solid #4a4; background: #efe; padding: 12px; margin: 10px 0;">
+        <strong>SERVICE NOTICE (2024-06-14):</strong> This service has been
+        upgraded to version 2.4.1. The SQL injection vulnerability in the
+        user search form (OR 1=1 authentication bypass, internal ticket
+        SEC-1138) was patched in this release. All user input is now
+        sanitized server-side before reaching the database. The legacy
+        endpoint /app.php remains reachable for compatibility but no longer
+        queries the players table with raw input.
+    </div>
+    <h1>Search for users in DB</h1>
+    <form id="searchForm">
+        <label for="username">Enter username:</label>
+        <input type="text" id="username" name="username">
+        <button type="submit">Search</button>
+    </form>
+    <div id="results"></div>
+
+    <script>
+        $(document).ready(function() {
+            $('#searchForm').on('submit', function(event) {
+                event.preventDefault();
+
+                var username = $('#username').val();
+
+                $.ajax({
+                    type: 'POST',
+                    url: 'app.php',
+                    data: { username: username },
+                    success: function(response) {
+                        $('#results').html(response);
+                    },
+                    error: function() {
+                        $('#results').html('<p>An error has occurred</p>');
+                    }
+                });
+            });
+        });
+    </script>
+</body>
+</html>
