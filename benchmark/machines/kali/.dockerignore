@@ -1,0 +1,2 @@
+# tmp_script is a bind mount the driver writes into; keep it out of the context.
+tmp_script/

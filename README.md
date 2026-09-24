@@ -51,6 +51,43 @@ Install the requirements and setup the machines
 make install
 ```
 
+### Build performance
+
+`make install` builds every image in the benchmark. The main costs, and how
+they were cut:
+
+- **The Kali workstation image.** It used to run `apt-get full-upgrade` against
+  Kali's rolling repo on every cold build. That is gone now: apt runs in a
+  single layer, so the image is ~9.7 GB instead of ~20 GB. The trade-off is
+  that tool versions come from the base snapshot (metasploit 6.4.2, nmap 7.94)
+  rather than whatever rolling has today. To restore the upgrade, insert
+  `&& apt-get -y --fix-missing -o Dpkg::Options::="--force-overwrite" full-upgrade`
+  after the `${KALI_PKG}` install in `benchmark/machines/kali/Dockerfile`.
+- **Re-downloading apt indexes and packages.** The Debian-based machines share
+  BuildKit cache mounts for `/var/lib/apt/lists` and `/var/cache/apt`, and drop
+  `/etc/apt/apt.conf.d/docker-clean` (which the base images ship and which
+  otherwise deletes the downloaded `.debs` after every apt call).
+
+Two things in the Kali image are easy to break:
+
+- `pycryptodome` must come from PyPI and must install *after* the apt layer
+  (which upgrades python3 to 3.14). apt's `python3-pycryptodome` provides the
+  `Cryptodome` namespace, not the `Crypto` namespace the tasks use.
+- The nmap `setcap` calls cover both binary paths and tolerate `setcap -r`
+  exiting non-zero when there is nothing to strip.
+
+While iterating on one machine, build only what it needs rather than all
+~45 images:
+
+```bash
+make build-task in-vitro access_control   # base machines + one category
+make build-kali                           # just the Kali workstation
+```
+
+`docker compose` builds (`make build`, `make build-task`, `make test`) already
+use BuildKit and get the cache mounts. A bare `docker build` does too only once
+the buildx plugin is installed: `sudo apt install docker-buildx`.
+
 To test one instance of the benchmark, refer to the [example folder](./examples/). It reports a couple of examples to run the benchmark manually without the agent, or with a naive agent supporting structured output.
 
 

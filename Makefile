@@ -6,13 +6,29 @@ CMD_MILESTONES := $(MILESTONES)/command_milestones
 STG_MILESTONES := $(MILESTONES)/stage_milestones
 
 # Every goal this Makefile defines, in one place.
-GOALS := build install install-dev test test-unit lint create create_structure
+GOALS := build build-task build-kali install install-dev test test-unit lint create create_structure
 
 .PHONY: $(GOALS)
+
+# Compose files for one task: base machines (incl. Kali) + the requested
+# category/task_type. Recursive (`=`) so it picks up the args parsed below.
+TASK_COMPOSE = -f benchmark/machines/docker-compose.yml -f benchmark/machines/$(category)/$(task_type)/docker-compose.yml
 
 build:
 	$(eval DC := $(shell find benchmark -name 'docker-compose.yml' -print0 | xargs -0 -I {} echo "-f {}" | grep -v "benchmark/machines/docker-compose.yml"))
 	docker compose -f benchmark/machines/docker-compose.yml $(DC) build
+
+# Build only what one task needs (base machines + one category), not all
+# ~45 images. Use this while iterating on a single task.
+build-task:
+	@test -n "$(category)" -a -n "$(task_type)" || \
+		{ echo "usage: make build-task <category> <task_type>"; \
+		  echo "  e.g. make build-task in-vitro access_control"; exit 1; }
+	@docker compose $(TASK_COMPOSE) build
+
+# The Kali workstation is shared by every task and is by far the most
+# Rebuild just the (shared, expensive) Kali workstatio
+	@docker compose -f benchmark/machines/docker-compose.yml build kali_master
 
 install: build
 	setup/setup.sh
@@ -24,7 +40,7 @@ test:
 	@test -n "$(category)" -a -n "$(task_type)" -a -n "$(vm)" || \
 		{ echo "usage: make test <category> <task_type> <vm>"; \
 		  echo "  e.g. make test in-vitro access_control 0"; exit 1; }
-	@docker compose -f benchmark/machines/docker-compose.yml -f benchmark/machines/$(category)/$(task_type)/docker-compose.yml build
+	@docker compose $(TASK_COMPOSE) build
 	@python3 benchmark/tests/machine_test.py $(category) $(task_type) $(vm)
 
 test-unit:

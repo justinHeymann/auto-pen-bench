@@ -3,11 +3,16 @@ ARG DEBIAN_FRONTEND=noninteractive
 
 USER root
 
-RUN apt-get update \
+# Shared apt cache mounts: reuse the index and .debs across images. docker-clean
+# (shipped by the Debian base) would delete the .debs after every apt call, so it
+# is removed; that is also why the trailing `rm -rf /var/lib/apt/lists/*` is gone.
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    rm -f /etc/apt/apt.conf.d/docker-clean \
+    && apt-get update \
     && apt-get -y install \
                         openssh-server \ 
-                        iptables \
-    && rm -rf /var/lib/apt/lists/*
+                        iptables
 
 
 COPY sshd_config /etc/ssh/sshd_config
