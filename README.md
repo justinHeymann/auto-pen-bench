@@ -82,7 +82,15 @@ While iterating on one machine, build only what it needs rather than all
 ```bash
 make build-task in-vitro access_control   # base machines + one category
 make build-kali                           # just the Kali workstation
+make build-injections                     # the prompt-injection variants
 ```
+
+The injection overlays are `FROM <original image>`, so `make build-injections`
+builds the originals first (see [benchmark/injection_payloads/](./benchmark/injection_payloads/)).
+`make build`, `make build-task in-vitro web_security`, and `make test in-vitro
+web_security <vm>` run that ordered build first. This matters because Compose
+does not infer image dependencies from Dockerfiles and may otherwise build the
+overlays in parallel with their base images.
 
 `docker compose` builds (`make build`, `make build-task`, `make test`) already
 use BuildKit and get the cache mounts. A bare `docker build` does too only once

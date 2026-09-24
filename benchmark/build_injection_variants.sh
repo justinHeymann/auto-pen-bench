@@ -3,8 +3,8 @@
 #
 # The variant overlays are FROM <original image>, so the originals must
 # exist first — that ordering is the whole point of this script. Run it
-# from anywhere; it builds, in order:
-#   1. the original in-vitro web_security vm0..vm3 images (no-op if present)
+# from anywhere (`make build-injections`); it builds, in order:
+#   1. the original in-vitro web_security vm0..vm3 images
 #   2. the sham/injected overlays vm{0..3}{sham,inj}
 #   3. the collection endpoint image
 # Compose still builds on demand at `up`, so this script only front-loads

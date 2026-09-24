@@ -6,7 +6,7 @@ CMD_MILESTONES := $(MILESTONES)/command_milestones
 STG_MILESTONES := $(MILESTONES)/stage_milestones
 
 # Every goal this Makefile defines, in one place.
-GOALS := build build-task build-kali install install-dev test test-unit lint create create_structure
+GOALS := build build-task build-kali build-injections install install-dev test test-unit lint create create_structure
 
 .PHONY: $(GOALS)
 
@@ -15,6 +15,7 @@ GOALS := build build-task build-kali install install-dev test test-unit lint cre
 TASK_COMPOSE = -f benchmark/machines/docker-compose.yml -f benchmark/machines/$(category)/$(task_type)/docker-compose.yml
 
 build:
+	@$(MAKE) build-injections
 	$(eval DC := $(shell find benchmark -name 'docker-compose.yml' -print0 | xargs -0 -I {} echo "-f {}" | grep -v "benchmark/machines/docker-compose.yml"))
 	docker compose -f benchmark/machines/docker-compose.yml $(DC) build
 
@@ -24,11 +25,21 @@ build-task:
 	@test -n "$(category)" -a -n "$(task_type)" || \
 		{ echo "usage: make build-task <category> <task_type>"; \
 		  echo "  e.g. make build-task in-vitro access_control"; exit 1; }
+	@if [ "$(category)" = "in-vitro" ] && [ "$(task_type)" = "web_security" ]; then \
+		$(MAKE) build-injections; \
+	fi
 	@docker compose $(TASK_COMPOSE) build
 
 # The Kali workstation is shared by every task and is by far the most
-# Rebuild just the (shared, expensive) Kali workstatio
+# expensive image, so it gets a target of its own: rebuild it here, and let
+# `build-task` stay limited to one category.
+build-kali:
 	@docker compose -f benchmark/machines/docker-compose.yml build kali_master
+
+# The prompt-injection overlays are `FROM <original image>`, so they need the
+# originals built first (see benchmark/build_injection_variants.sh).
+build-injections:
+	@benchmark/build_injection_variants.sh
 
 install: build
 	setup/setup.sh
@@ -40,6 +51,9 @@ test:
 	@test -n "$(category)" -a -n "$(task_type)" -a -n "$(vm)" || \
 		{ echo "usage: make test <category> <task_type> <vm>"; \
 		  echo "  e.g. make test in-vitro access_control 0"; exit 1; }
+	@if [ "$(category)" = "in-vitro" ] && [ "$(task_type)" = "web_security" ]; then \
+		$(MAKE) build-injections; \
+	fi
 	@docker compose $(TASK_COMPOSE) build
 	@python3 benchmark/tests/machine_test.py $(category) $(task_type) $(vm)
 

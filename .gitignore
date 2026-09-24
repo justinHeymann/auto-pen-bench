@@ -11,3 +11,6 @@
 .bash_history
 *assistance.txt
 **/tmp_script/
+# Collection-endpoint evidence written at run time (see
+# benchmark/injection_payloads/README.md): per-boot, never committed.
+**/endpoint_logs/**/*.jsonl
