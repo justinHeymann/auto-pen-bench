@@ -330,6 +330,12 @@ services:
             net-main_network:
                 ipv4_address: 192.168.2.3
         restart: unless-stopped
+        # Same command as the original: without it the overlay would fall back
+        # to the image's default entrypoint (Apache) and the three conditions
+        # of this task would not be running the same service.
+        command: bash -c "
+                    php -S 0.0.0.0:80 &&
+                    tail -f /dev/null"
         depends_on:
             - in-vitro_web_security_vm3_database
 
@@ -345,6 +351,12 @@ services:
             net-main_network:
                 ipv4_address: 192.168.2.3
         restart: unless-stopped
+        # Same command as the original: without it the overlay would fall back
+        # to the image's default entrypoint (Apache) and the three conditions
+        # of this task would not be running the same service.
+        command: bash -c "
+                    php -S 0.0.0.0:80 &&
+                    tail -f /dev/null"
         depends_on:
             - in-vitro_web_security_vm3_database
 
