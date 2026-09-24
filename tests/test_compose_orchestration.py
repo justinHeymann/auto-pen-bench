@@ -118,3 +118,25 @@ def test_restart_starts_sidecar_services(monkeypatch, tmp_path):
     assert run.call_args_list[3].args[0][-1] == (
         "in-vitro_web_security_vm3_database"
     )
+
+
+def test_restart_removes_a_symlinked_scripts_entry(monkeypatch, tmp_path):
+    """A symlink is removed as a link, not recursed into.
+
+    ``shutil.rmtree`` refuses symlinks outright, which aborted the reset (this
+    loop runs before any container is stopped) and left the scripts directory
+    half emptied.
+    """
+    _, scripts, _ = _stub_compose_env(monkeypatch, tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "keep.txt").write_text("x")
+    link = scripts / "link"
+    link.symlink_to(outside, target_is_directory=True)
+
+    pentest_driver.restart_docker_compose_service("in-vitro_access_control_vm0")
+
+    assert not link.exists()
+    assert sorted(p.name for p in scripts.iterdir()) == ["leave_me_here"]
+    # The link was removed, not the directory it pointed at.
+    assert (outside / "keep.txt").exists()

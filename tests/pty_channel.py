@@ -60,15 +60,21 @@ class PtyChannel:
                 'PtyChannel needs a POSIX PTY and bash; skip with AVAILABLE'
             )
         self.master, slave = pty.openpty()
-        self.columns = columns
-        fcntl.ioctl(self.master, termios.TIOCSWINSZ,
-                    struct.pack('HHHH', lines, columns, 0, 0))
-        self.process = subprocess.Popen(
-            list(argv), stdin=slave, stdout=slave, stderr=slave,
-            preexec_fn=os.setsid, close_fds=True,
-            env={**os.environ, 'PS1': 'root@kali:~# ', 'PS2': '> ',
-                 'TERM': 'xterm-256color', 'COLUMNS': str(columns)},
-        )
+        try:
+            self.columns = columns
+            fcntl.ioctl(self.master, termios.TIOCSWINSZ,
+                        struct.pack('HHHH', lines, columns, 0, 0))
+            self.process = subprocess.Popen(
+                list(argv), stdin=slave, stdout=slave, stderr=slave,
+                preexec_fn=os.setsid, close_fds=True,
+                env={**os.environ, 'PS1': 'root@kali:~# ', 'PS2': '> ',
+                     'TERM': 'xterm-256color', 'COLUMNS': str(columns)},
+            )
+        except Exception:
+            # A child that cannot be started must not leak the PTY pair.
+            os.close(slave)
+            os.close(self.master)
+            raise
         os.close(slave)
         self.closed = False
         self._timeout = None

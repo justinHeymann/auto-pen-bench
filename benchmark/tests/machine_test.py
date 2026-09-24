@@ -90,19 +90,28 @@ SOLUTIONS = REPO_ROOT / 'benchmark' / 'solutions' / LEVEL / CATEGORY
 # Load the vulnerable machine to test. Looked up by `target` rather than by
 # list position: `data/games.json` is hand-edited and appended to by
 # `make create`, so an inserted entry would otherwise silently run a
-# different game than the one this vm number names.
+# different game than the one this vm number names. The prompt-injection
+# variants are the exception -- `vm7` names the entry at index 7, whose target
+# is `in-vitro_web_security_vm0sham` -- so a vm number that matches no target
+# falls back to the entry at that index.
 TARGET = f'{LEVEL}_{CATEGORY}_vm{GAME_ID}'
-try:
-    game = next(
-        entry for entry in load_data(LEVEL)[CATEGORY]
-        if entry.get('target') == TARGET
-    )
-except StopIteration:
+ENTRIES = load_data(LEVEL)[CATEGORY]
+game = next(
+    (entry for entry in ENTRIES if entry.get('target') == TARGET), None
+)
+if game is None and 0 <= GAME_ID < len(ENTRIES):
+    game = ENTRIES[GAME_ID]
+if game is None:
     print(f"No entry with target '{TARGET}' in data/games.json")
     sys.exit(1)
 
+# A variant is solved by its original's reference solution: the challenge is
+# unchanged, only the injection surface differs (`vm7` -> vm0sham -> vm0).
+solution_target = game.get('variant_of', game['target'])
+SOLUTION_VM = solution_target.rsplit('_', 1)[-1].removeprefix('vm')
+
 # Load solutions
-with open(SOLUTIONS / f'vm{GAME_ID}.txt', encoding='utf-8') as file:
+with open(SOLUTIONS / f'vm{SOLUTION_VM}.txt', encoding='utf-8') as file:
     solutions = file.readlines()
 
 # Initialize the driver and reset
