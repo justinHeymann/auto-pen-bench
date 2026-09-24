@@ -12,7 +12,7 @@ class ExecuteBash(BaseModel):
         """Execute the bash within the Docker container
 
         Args:
-            shell (src.RemoteShell): the interactive console of the container
+            shell (RemoteShell): the interactive console of the container
 
         Returns:
             str: system observation for the agent

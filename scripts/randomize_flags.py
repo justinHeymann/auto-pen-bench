@@ -33,9 +33,12 @@ be memorized by a model from public benchmark data:
 
     python scripts/randomize_flags.py [--dry-run]
 """
+import contextlib
 import json
+import os
 import re
 import secrets
+import stat
 import string
 import sys
 from pathlib import Path
@@ -98,10 +101,15 @@ def random_token(length: int) -> str:
 
 
 def variant_counts(games: dict) -> dict:
-    """How many entries each target has declaring it as their ``variant_of``.
+    """How many entries each target has repeating its flag.
 
     A derived entry repeats its original's flag by design, so the number of
     occurrences of a flag in games.json is ``1 + variants`` rather than 1.
+    ``variant_of`` is what a well-formed entry declares, but the target's own
+    suffix counts as well: an entry that lost the key (or names it wrongly)
+    still repeats the flag, and recognizing only the key would leave the
+    occurrence count permanently mismatched -- so the original would be
+    skipped on every run, silently and for good.
     """
     counts = {}
     for categories in games.values():
@@ -110,12 +118,108 @@ def variant_counts(games: dict) -> dict:
                 original = entry.get('variant_of')
                 if original:
                     counts[original] = counts.get(original, 0) + 1
+                    continue
+                match = TARGET_RE.match(entry.get('target', ''))
+                if match and match.group(4):
+                    base = entry['target'][: -len(match.group(4))]
+                    counts[base] = counts.get(base, 0) + 1
     return counts
 
 
+def _write_text_atomically(path: Path, text: str) -> None:
+    """Write ``text`` to ``path`` through a temporary file and a rename.
+
+    Both ``games.json`` and the flag files are read back by the benchmark, so
+    a crash mid-write must not leave a truncated file behind: the rename is
+    atomic, the truncation is not.
+    """
+    previous_mode = None
+    with contextlib.suppress(FileNotFoundError):
+        previous_mode = stat.S_IMODE(path.stat().st_mode)
+    temporary = path.with_name(path.name + '.tmp')
+    temporary.write_text(text, encoding='utf-8')
+    if previous_mode is not None:
+        os.chmod(temporary, previous_mode)
+    os.replace(temporary, path)
+
+
+def _journal_path() -> Path:
+    """Path of the recovery record beside the benchmark's games file."""
+    return GAMES_PATH.with_name('.randomize_flags-journal.json')
+
+
+def _write_journal(journal: dict) -> None:
+    _write_text_atomically(
+        _journal_path(), json.dumps(journal, ensure_ascii=False),
+    )
+
+
+def _recover_pending_transaction() -> None:
+    """Finish or roll back an interrupted flag-update transaction.
+
+    Replacing individual files is atomic, but replacing a flag set and
+    ``games.json`` cannot be. The journal records both versions before the
+    first replacement; a later invocation can therefore restore a partial
+    update, or retain a fully committed one after a crash during cleanup.
+    """
+    path = _journal_path()
+    if not path.exists():
+        return
+    try:
+        journal = json.loads(path.read_text(encoding='utf-8'))
+        committed = bool(journal['committed'])
+        writes = journal['writes']
+        for item in writes:
+            target = Path(item['path'])
+            before, after = item['before'], item['after']
+            current = target.read_text(encoding='utf-8')
+            if current not in (before, after):
+                raise RuntimeError(
+                    f'{target} changed outside the pending flag transaction; '
+                    'refusing to overwrite it'
+                )
+            desired = after if committed else before
+            if current != desired:
+                _write_text_atomically(target, desired)
+    except (KeyError, TypeError, json.JSONDecodeError) as error:
+        raise RuntimeError(
+            f'cannot recover flag transaction recorded in {path}: {error}'
+        ) from error
+    path.unlink()
+
+
+def _apply_transaction(writes: list[tuple[Path, str, str]]) -> None:
+    """Apply related file replacements with durable rollback information."""
+    journal = {
+        'committed': False,
+        'writes': [
+            {'path': str(path), 'before': before, 'after': after}
+            for path, before, after in writes
+        ],
+    }
+    _write_journal(journal)
+    try:
+        for path, _before, after in writes:
+            _write_text_atomically(path, after)
+        journal['committed'] = True
+        _write_journal(journal)
+    except Exception:
+        # The journal remains if rollback itself is interrupted, so the next
+        # run can complete it instead of leaving games.json and flags apart.
+        _recover_pending_transaction()
+        raise
+    _journal_path().unlink()
+
+
 def randomize(dry_run: bool = False) -> int:
+    # A dry run must remain read-only, even when a previous interrupted commit
+    # is waiting for recovery. A normal run repairs that state before deciding
+    # which flags to randomize.
+    if not dry_run:
+        _recover_pending_transaction()
     # Parse existing file (preserve hand-formatted spacing if present)
     raw_games_text = GAMES_PATH.read_text(encoding='utf-8')
+    original_games_text = raw_games_text
     try:
         games = json.loads(raw_games_text)
     except json.JSONDecodeError:
@@ -124,8 +228,12 @@ def randomize(dry_run: bool = False) -> int:
 
     changed = 0
     skipped = 0
-    new_games_text = raw_games_text
     variants = variant_counts(games)
+    # (path, old text, new text) of every file the run decided to rewrite. Staged rather
+    # than written as we go: an entry that aborts the run halfway (Ctrl-C, a
+    # later entry failing) must not leave the first flag files holding a token
+    # that games.json still calls stale.
+    pending = []
 
     for level, categories in list(games.items()):
         for entries in list(categories.values()):
@@ -206,15 +314,19 @@ def randomize(dry_run: bool = False) -> int:
                 print(f'[ok]   {target}: {old_flag} -> {new_flag} ({relpath})'
                       + (f' + {derived} derived entr'
                          f'{"y" if derived == 1 else "ies"}' if derived else ''))
-                if not dry_run:
-                    flag_path.write_text(
-                        raw_flag_file.replace(old_flag, new_flag),
-                        encoding='utf-8',
-                    )
+                pending.append(
+                    (flag_path, raw_flag_file,
+                     raw_flag_file.replace(old_flag, new_flag))
+                )
                 changed += 1
 
     if not dry_run and changed:
-        GAMES_PATH.write_text(raw_games_text, encoding='utf-8')
+        # Every entry has been checked by now, so the set of files still
+        # agrees with itself. A durable journal preserves that agreement if
+        # this process or a replacement fails during the multi-file commit.
+        _apply_transaction(
+            [*pending, (GAMES_PATH, original_games_text, raw_games_text)]
+        )
 
     print(f'\n{changed} flag(s) randomized, {skipped} skipped.'
           + (' (dry run, nothing written)' if dry_run else ''))

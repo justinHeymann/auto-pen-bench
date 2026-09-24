@@ -130,14 +130,19 @@ def forbidden_net_tool(cmd: str) -> str | None:
 
 
 def _program_of(tokens) -> str:
-    """The program a token list runs, skipping leading ``VAR=value`` words.
+    """The program a token list runs, skipping shell keywords and ``VAR=value``.
 
-    ``FOO=1 sudo id`` runs ``sudo``, not ``FOO=1``; the first token that is
-    not a variable assignment is the program.
+    ``FOO=1 sudo id`` runs ``sudo``, not ``FOO=1``, and ``if sudo id`` runs
+    ``sudo``, not ``if``: the first token that is neither a shell keyword nor
+    a variable assignment is the program. Skipping the keywords matters for
+    the sudo checks below -- with `if` as the apparent program, a sudo inside
+    a conditional got the completion marker (see
+    :func:`may_prompt_for_password`).
     """
     for token in tokens:
-        if not _VARIABLE_ASSIGNMENT.match(token):
-            return token
+        if token in _SHELL_KEYWORDS or _VARIABLE_ASSIGNMENT.match(token):
+            continue
+        return token
     return ''
 
 
@@ -262,6 +267,33 @@ def decode_payload(data: bytes) -> str:
     return data.decode('latin-1')
 
 
+def _set_channel_timeout(shell, timeout: float) -> None:
+    """Bounds how long the next ``recv`` may block.
+
+    :func:`receive_data` can only keep its own deadline if the channel's
+    socket timeout is no longer than that deadline: paramiko raises its
+    timeout from *inside* ``recv``, so a channel left at a fixed 5 s makes a
+    1 s poll block for 5 s -- enough to push a command past the runner's
+    action timeout, which is what the command budget exists to avoid.
+    """
+    try:
+        shell.settimeout(timeout)
+    except Exception as error:
+        # Not fatal: recv() then blocks for the channel's existing timeout.
+        logger.debug('could not set channel timeout: %s', error)
+
+
+def _channel_timeout(shell):
+    """The channel's current timeout, or None when it cannot be read."""
+    try:
+        return shell.gettimeout()
+    except Exception as error:
+        # A channel that cannot report its timeout (a test double, another
+        # implementation) simply gets no restoration.
+        logger.debug('could not read channel timeout: %s', error)
+        return None
+
+
 def receive_data(shell: paramiko.Channel, timeout: float = 2.0):
     """Receives data from the shell and decodes it using the appropriate
     character encoding.
@@ -276,20 +308,27 @@ def receive_data(shell: paramiko.Channel, timeout: float = 2.0):
         there's a timeout.
     """
     deadline = time.monotonic() + timeout
-    while True:
-        try:
-            data = shell.recv(65536)
-            if not data:
+    # paramiko bounds *both* directions with this one timeout, so it is
+    # narrowed only for the reads below and restored afterwards: left at the
+    # remaining budget (or at zero), the next send would fail instead of
+    # waiting for the SSH send window.
+    previous_timeout = _channel_timeout(shell)
+    try:
+        while True:
+            _set_channel_timeout(shell, max(deadline - time.monotonic(), 0.0))
+            try:
+                data = shell.recv(65536)
+                if not data:
+                    return ''
+                return decode_payload(data)
+            except TimeoutError:
+                if time.monotonic() >= deadline:
+                    return ''
+                time.sleep(0.1)
+            except (OSError, EOFError):
                 return ''
-            break
-        except TimeoutError:
-            if time.monotonic() >= deadline:
-                return ''
-            time.sleep(0.1)
-        except (OSError, EOFError):
-            return ''
-
-    return decode_payload(data)  # Return the decoded text data
+    finally:
+        _set_channel_timeout(shell, previous_timeout)
 
 
 def last_non_empty_line(text: str) -> str:
@@ -598,7 +637,8 @@ class RemoteShell:
         skipped, so a command that prints the banner itself (or cats a log
         holding it) cannot make the driver believe a session is active. The
         session is over when the closed banner appears, which is what msf
-        prints when the agent leaves it with `exit`.
+        prints when the agent leaves it with `exit`. When one observation
+        carries both banners, the *last* one decides -- see the loop below.
 
         Args:
             out (str): The shell output to check.
@@ -611,6 +651,12 @@ class RemoteShell:
                 one cannot.
         """
         echo = cmd.strip()
+        # An observation can hold both banners: a one-shot msfconsole command
+        # that opens a session and exits, or a log the agent printed. Stopping
+        # at the first one leaves the driver telling the agent that a session
+        # it has already left is the active shell, so the last banner wins.
+        seen_banner = False
+        session_kind = None
         for line in out.split('\n'):
             # The escaped hooks are glued to the line they precede, so compare
             # the echo with them removed -- otherwise `echo "Command shell
@@ -620,15 +666,17 @@ class RemoteShell:
             match = _SESSION_BANNER.search(line)
             if not match:
                 continue
+            seen_banner = True
             if match.group(2).lower() == 'closed':
-                self.session_kind = None
+                session_kind = None
             else:
-                self.session_kind = (
+                session_kind = (
                     METERPRETER_SESSION
                     if 'meterpreter' in match.group(1).lower()
                     else COMMAND_SHELL_SESSION
                 )
-            return self.session_kind is not None
+        if seen_banner:
+            self.session_kind = session_kind
         return self.session_kind is not None
 
     def _clean(self, out: str, marker: str | None,
