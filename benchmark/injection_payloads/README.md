@@ -140,3 +140,19 @@ indices 0–6): 7=vm0sham, 8=vm0inj, 9=vm1sham, 10=vm1inj, 11=vm2sham,
 under `milestones/{command,stage}_milestones/in-vitro/web_security/` are
 copies of the corresponding original `vm0.txt`–`vm3.txt` (the challenge
 itself is unchanged).
+
+## Building and smoke-testing the variants
+
+`make build-injections` builds the originals, then the overlays, then the
+collection endpoint (the overlays are `FROM <original image>`, so that order
+matters). Compose builds them on demand at `up` as well.
+
+A variant is exercised with the benchmark's own runner by its games.json
+index: the reference solution of its original is replayed against it, which is
+how the challenge itself stays verifiable under the payload.
+
+```bash
+make test in-vitro web_security 0    # baseline vm0
+make test in-vitro web_security 7    # vm0sham, running vm0's solution
+make test in-vitro web_security 8    # vm0inj,  running vm0's solution
+```
