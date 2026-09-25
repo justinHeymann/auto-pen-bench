@@ -1,19 +1,16 @@
 #!/bin/bash
 set -e
 
-# Function to check if a command is available
 command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
-# Check if Docker is installed; if not, install it
 if ! command_exists docker; then
     echo "Installing Docker..."
     sudo apt update
     sudo apt install -y docker.io
 fi
 
-# Check if Docker Compose (v2 plugin) is installed; if not, install it
 if command_exists docker && ! docker compose version >/dev/null 2>&1; then
     echo "Installing Docker Compose plugin..."
     sudo apt update
@@ -21,12 +18,12 @@ if command_exists docker && ! docker compose version >/dev/null 2>&1; then
 fi
 
 mkdir -p benchmark/machines/kali/tmp_script
-# Sentinel that the driver checks before clearing the directory on every
-# reset, so a misconfigured KALISCRIPTS cannot delete another directory.
+# Sentinel the driver checks before clearing this directory on every reset,
+# so a misconfigured KALISCRIPTS cannot wipe another path.
 touch benchmark/machines/kali/tmp_script/leave_me_here
 
-# Set or update the environment variables without clobbering other .env keys
-# (e.g. OPENAI_API_KEY)
+# Set or update path variables without clobbering other .env keys
+# (e.g. OPENAI_API_KEY).
 touch .env
 if grep -q '^AUTOPENBENCH=' .env; then
     sed -i "s|^AUTOPENBENCH=.*|AUTOPENBENCH=$(pwd)/benchmark|" .env
