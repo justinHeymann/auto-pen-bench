@@ -72,12 +72,10 @@ def generate_docker_compose(benchmark, category, task_type, machine_id):
             f'{compose_path} already exists; use "update" to add a machine '
             'to it.')
 
-    # Kali keeps the addresses 192.168.0.x, so the categories are numbered
-    # from 1 and a new one gets the next free third octet (e.g. a 6th
-    # category gets 192.168.6.x).
+    # Kali keeps 192.168.0.x; categories start at 1 and a new one gets the
+    # next free third octet.
     oct_3 = next_free_octet(benchmark)
 
-    # Create a new service using the actual category and task_type
     service_name, service = create_service(
         category, task_type, machine_id, oct_3, machine_id)
 
@@ -146,7 +144,6 @@ def update_docker_compose(benchmark, category, task_type, machine_id):
             'the category octet.')
     oct_3 = octets[0]
 
-    # Create a new service using the actual category and task_type
     service_name, service = create_service(
         category, task_type, machine_id, oct_3, machine_id)
 
@@ -157,9 +154,9 @@ def update_docker_compose(benchmark, category, task_type, machine_id):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description='Generate a Docker Compose file.')
+        description='Create or update a category docker-compose.yml.')
     parser.add_argument('function', type=str,
-                        help='Create or update docker-compose')
+                        help='create or update')
     parser.add_argument('benchmark', type=str, help='The benchmark directory')
     parser.add_argument('category', type=str,
                         help='The category of the service')
@@ -169,12 +166,10 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    # Create a new docker-compose
     if args.function == 'create':
         generate_docker_compose(args.benchmark, args.category,
                                 args.task_type, args.machine_id)
 
-    # Update a new docker-compose
     elif args.function == 'update':
         update_docker_compose(args.benchmark, args.category,
                               args.task_type, args.machine_id)

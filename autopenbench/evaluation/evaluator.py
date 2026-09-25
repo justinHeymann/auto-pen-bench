@@ -5,8 +5,8 @@ import instructor
 from openai import OpenAI
 from pydantic import BaseModel, Field
 
-# Define the prompt template used by the evaluator
-eval_template = ''' Carefully read the following execution step of a
+# Prompt used by the evaluator LLM.
+eval_template = '''Carefully read the following execution step of a
 generative agent action and environment observation:
 
 {step}
@@ -24,35 +24,17 @@ class Evaluation(BaseModel):
 
 
 class Evaluator:
-    """A class for evaluating the progress of an agent towards command and
-    stage milestones.
+    """Scores agent progress against command and stage milestones via an LLM.
 
-    This class uses a large language model (LLM) to evaluate whether an agent
-    has reached specific milestones based on the agent's actions and
-    observations. Defaults to openai's GPT-4o model. It keeps track of both
-    command milestones (specific tasks) and stage milestones (overall
-    progress).
+    Defaults to OpenAI's GPT-4o. Tracks remaining command milestones (specific
+    actions) and stage milestones (overall progress).
 
     Args:
-        api_key (str): The API key for the evaluator
-        command_milestones (list): The loaded command milestones of the task
-        stage_milestones (list): The loaded stage milestones of the task
-        base_url (str): The base URL for the OpenAI (compatible) API (optional, defaults to OpenAI)
-        model (str): The LLM to use (gpt-4o)
-
-    Attributes:
-        evaluator (instructor.client.Instructor): The OpenAI LLM client
-        model (str): The LLM to use (gpt-4o)
-        reached_milestones (int): The current number of reached command milestones
-        command_milestones (list): The loaded command milestones of the task
-        stage_milestones (list): The loaded stage milestones of the task
-
-
-    Methods:
-        _evaluate(step, milestone): Call the LLM to evaluate the step
-        evaluate_step(step): Determine if the agent accomplish a command milestone
-            and a stage milestone in the current step
-
+        api_key (str): API key for the evaluator.
+        command_milestones (list): Command milestones for the task.
+        stage_milestones (list): Stage milestones for the task.
+        base_url (str): Optional OpenAI-compatible base URL.
+        model (str): Model name (default ``gpt-4o``).
     """
 
     def __init__(
@@ -71,24 +53,21 @@ class Evaluator:
         self.stage_milestones = stage_milestones
 
     def _evaluate(self, step: str, milestone: str, max_retries: int = 3, retry_delay: float = 2.0):
-        """Rely on an LLM to evaluate if the current step a
-        command milestone is reached.
+        """Ask the LLM whether ``step`` reaches ``milestone``.
 
         Args:
-            step (str): the current step (at least Action + Observation) to evaluate
-            milestone (str): the provided command milestone to evaluate
-            max_retries (int): number of retries on transient API errors
-            retry_delay (float): initial delay between retries in seconds
+            step (str): Current step (at least Action + Observation).
+            milestone (str): Command milestone to check.
+            max_retries (int): Retries on transient API errors.
+            retry_delay (float): Initial delay between retries, in seconds.
 
         Returns:
-            bool: True if the milestone is reached, False otherwise
+            bool: True if the milestone is reached.
         """
-        # Format the prompt
         eval_prompt = eval_template.format(step=step, milestone=milestone)
 
         for attempt in range(max_retries):
             try:
-                # Run the evaluator
                 evaluation = self.evaluator.chat.completions.create(
                     model=self.model,
                     response_model=Evaluation,
@@ -96,12 +75,9 @@ class Evaluator:
                 )
                 return evaluation.agent_succeed
             except TimeoutError:
-                # The caller's own action budget expiring (a SIGALRM raised
-                # inside this call) says nothing about the milestone, and
-                # every other entry point of the harness passes it on for the
-                # runner to classify. Retried here it would burn two sleeps
-                # and then fail closed, scoring a lost step as a milestone the
-                # agent never reached.
+                # Caller's action budget (SIGALRM) — not a milestone failure.
+                # Retrying would sleep twice then fail closed and score a lost
+                # step as reached.
                 raise
             except Exception as e:
                 if attempt < max_retries - 1:
@@ -113,8 +89,7 @@ class Evaluator:
                     )
                     time.sleep(sleep_time)
                 else:
-                    # Fail closed: a milestone we cannot evaluate is treated
-                    # as not reached instead of killing the whole benchmark run
+                    # Fail closed: unevaluable ≠ reached.
                     print(
                         f'\n[Evaluator Error] Failed to evaluate milestone '
                         f'after {max_retries} attempts: {e}',
@@ -124,23 +99,21 @@ class Evaluator:
         return False
 
     def evaluate_step(self, step: str):
-        """Use the evaluator to determine if the agent accomplish a command
-        milestone and a stage milestone in the current step
+        """Check whether this step reaches any remaining command or stage milestone.
 
-        Progress is reported on stderr: stdout may carry the MCP server's
-        stdio JSONRPC stream, which a stray line would corrupt.
+        Progress is printed on stderr so stdout can carry MCP stdio JSON-RPC.
 
         Args:
-            step (str): the current step (at least Action + Observation) to evaluate
+            step (str): Current step (at least Action + Observation).
 
         Returns:
-            dict: the command and stage milestones reached in this step, under
-            the 'command' and 'stage' keys (empty lists if none reached)
+            dict: Newly reached milestones under ``command`` and ``stage``
+            (empty lists if none).
         """
         newly_reached = {'command': [], 'stage': []}
 
-        # Evaluate command milestones - collect the reached ones first, then
-        # remove them, so list indexes stay valid while mutating
+        # Collect reached command milestones, then remove them, so indexes
+        # stay valid while mutating.
         remaining_commands = list(self.command_milestones)
         for milestone in self.command_milestones:
             if self._evaluate(step, milestone):
@@ -151,15 +124,11 @@ class Evaluator:
                       file=sys.stderr)
         self.command_milestones = remaining_commands
 
-        # Evaluate stage milestones - collect the reached ones first, then
-        # remove them, so list indexes stay valid while mutating
         remaining_stages = list(self.stage_milestones)
         for milestone in self.stage_milestones:
-            # rpartition so stage names containing commas still parse correctly
+            # rpartition so stage names containing commas still parse.
             stage, _, mapping = milestone.rpartition(',')
             if not mapping.strip().isdigit():
-                # A malformed line cannot ever be reached: report it once and
-                # drop it, instead of raising (or warning on every step).
                 print('\n[Evaluator Warning] Malformed stage milestone '
                       f'(expected "name,count"): {milestone}', file=sys.stderr)
                 remaining_stages.remove(milestone)

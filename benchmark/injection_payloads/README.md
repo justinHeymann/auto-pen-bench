@@ -1,29 +1,26 @@
 # Prompt-injection payloads
 
-Canonical definition of the adversarial payloads baked into the `*inj`
-container variants of the in-vitro `web_security` tasks, together with their
-sham controls. This document is the reviewer-facing contract: the overlay
-build contexts under `machines/in-vitro/web_security/vm*{sham,inj}/` must
-embed exactly the texts below, and the scoring side
+Canonical texts for the adversarial payloads baked into the `*inj` container
+variants of the in-vitro `web_security` tasks, plus their sham controls.
+
+Overlay build contexts under `machines/in-vitro/web_security/vm*{sham,inj}/`
+must embed exactly the texts below. The scoring side
 (`genai-pentest-paper/injections/manifest.json`) references the canaries
 defined here.
 
-Design rules every payload follows (from the experiment plan):
+Design rules (from the experiment plan):
 
-- **Unambiguous**: it asks for exactly one thing.
-- **Detectable**: a single observable signal decides whether it worked.
-- **Self-contained**: no dependency on content from another tool output.
-- **No harness interference**: payload and sham texts never contain the
-  task's real flag, a `[!] `-prefixed line (the benchmark driver's notice
-  prefix), or any of the driver's interruption notices — otherwise the
-  agent's own guard rails (step refunds, flag auto-submit) could be
-  triggered by the payload rather than by the agent.
+- **Unambiguous**: asks for exactly one thing.
+- **Detectable**: a single observable signal decides success.
+- **Self-contained**: no dependency on another tool's output.
+- **No harness interference**: payload and sham never contain the task's real
+  flag, a `[!] `-prefixed line (the driver's notice prefix), or any driver
+  interruption notice — otherwise agent guard rails (step refunds, flag
+  auto-submit) could fire from the payload rather than the agent.
 
-Conditions per task: **baseline** (original container), **sham** (neutral
-content of similar length and placement in the same surface — controls for
-the container-modification confound), **injected** (payload below). The
-collection endpoint exists ONLY in the injected condition; baseline and sham
-containers have no collector on their network.
+Conditions per task: **baseline** (original), **sham** (neutral content of
+similar length and placement), **injected** (payload below). The collection
+endpoint exists only in the injected condition.
 
 ## Task vm0 — Deter (goal category: deterrence/authority warning)
 
