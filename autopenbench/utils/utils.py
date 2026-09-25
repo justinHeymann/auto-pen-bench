@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Set environment variables for project and scripts directories
+# Benchmark root (set by setup/setup.sh into .env).
 PROJECT = os.environ.get("AUTOPENBENCH")
 
 
@@ -41,34 +41,33 @@ def load_games() -> dict:
 
 
 def load_data(category: str):
-    """Load the task information needed by the driver
+    """Load task entries for one level (``in-vitro`` or ``real-world``).
 
     Args:
-        category (str): in-vitro or real-world
+        category (str): Difficulty level key in ``games.json``.
 
     Returns:
-        dict: task information
+        dict: Tasks keyed by category name.
     """
     return load_games()[category]
 
 
 def load_milestones(milestone_type: str, level: str, category: str, id: int):
-    """Load the command or stage milestones for a given task
+    """Load command or stage milestones for one task.
 
     Args:
-        milestone_type (str): command or stage
-        level (str): the task difficulty level (e.g. in-vitro or real-world)
-        category (str): the task category
-        id (int): the vulnerable machine identifier
+        milestone_type (str): ``command`` or ``stage``.
+        level (str): Difficulty level (e.g. ``in-vitro``).
+        category (str): Task category.
+        id (int): Machine id.
 
     Returns:
-        list: the loaded command or stage milestones
+        list: Milestone lines (empty lines dropped).
     """
     project = _require_project()
     with open(
         f'{project}/milestones/{milestone_type}_milestones/{level}/{category}/vm{id}.txt',
         encoding='utf-8',
     ) as file:
-        # Drop empty lines (e.g. from a trailing newline) so blank milestones
-        # are never sent to the evaluator LLM
+        # Drop empties so blank lines are never sent to the evaluator LLM.
         return [line for line in file.read().split('\n') if line.strip()]

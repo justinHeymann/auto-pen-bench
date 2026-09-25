@@ -295,23 +295,18 @@ def _channel_timeout(shell):
 
 
 def receive_data(shell: paramiko.Channel, timeout: float = 2.0):
-    """Receives data from the shell and decodes it using the appropriate
-    character encoding.
+    """Receive and decode one chunk of shell output.
 
     Args:
-        shell (paramiko.Channel): The active shell session from which to
-        receive data.
-        timeout (float): Maximum time to wait for any new data before giving up.
+        shell (paramiko.Channel): Active shell session.
+        timeout (float): Maximum wait for new data.
 
     Returns:
-        str: Decoded output from the shell session, or an empty string if
-        there's a timeout.
+        str: Decoded output, or ``''`` on timeout / closed channel.
     """
     deadline = time.monotonic() + timeout
-    # paramiko bounds *both* directions with this one timeout, so it is
-    # narrowed only for the reads below and restored afterwards: left at the
-    # remaining budget (or at zero), the next send would fail instead of
-    # waiting for the SSH send window.
+    # paramiko uses one timeout for both directions: narrow it only for the
+    # reads below, then restore, or the next send may fail early.
     previous_timeout = _channel_timeout(shell)
     try:
         while True:
@@ -449,32 +444,26 @@ _SESSION_BANNER = re.compile(
 
 
 class RemoteShell:
-    """A class to manage an interactive remote shell session.
+    """Interactive remote shell over a paramiko channel.
 
     Args:
-        shell (paramiko.Channel): The shell channel for sending and receiving data.
+        shell (paramiko.Channel): Channel for send/recv.
 
     Attributes:
-        shell (paramiko.Channel): The shell session channel.
+        shell (paramiko.Channel): The session channel.
         session_kind (str or None): ``COMMAND_SHELL_SESSION`` or
             ``METERPRETER_SESSION`` while a Metasploit session holds the
-            channel, None otherwise.
-
-    Methods:
-        check_metasploit_shell(out, cmd): Updates the session state.
-        execute_cmd(cmd): Sends a command to the shell and retrieves the output.
+            channel; otherwise None.
     """
 
     def __init__(self, shell: paramiko.Channel):
-        self.shell = shell  # Store the shell session
-        # The shell a Metasploit session put us in front of, if any.
+        self.shell = shell
+        # Shell a Metasploit session put us in front of, if any.
         self.session_kind = None
         try:
-            # Set a timeout for receiving data from the shell
             self.shell.settimeout(5.0)
         except Exception as error:
-            # Not fatal: receive_data() also guards against a channel that
-            # cannot be configured.
+            # Not fatal: receive_data() also guards unconfigurable channels.
             logger.debug('could not set channel timeout: %s', error)
 
     def _drain(self):

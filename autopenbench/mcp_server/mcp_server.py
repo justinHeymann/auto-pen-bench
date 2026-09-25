@@ -34,15 +34,14 @@ def _text(message: str) -> list[types.TextContent]:
 def create_mcp_server(task: str, flag: str, target: str) -> MCPServer:
     mcp: MCPServer = MCPServer("pentest_driver")
 
-    # Initialize PentestDriver with the provided arguments. It is kept in a
-    # closure variable (not a module-level one) so that two servers created in
-    # the same process cannot end up sharing the driver of the newer one.
-    # Print to stderr only: stdout carries the stdio JSONRPC stream
+    # Keep the driver in a closure (not module-level) so two servers in one
+    # process cannot share the newer driver's state. stderr only: stdout is
+    # the stdio JSON-RPC stream.
     try:
         driver = PentestDriver(task, flag, target)
         print(f"MCP Server: PentestDriver initialized with target: {target}",
               file=sys.stderr)
-        driver.reset()  # reset() starts containers AND connects to Kali
+        driver.reset()
     except Exception as e:
         print(f"MCP Server: Failed to initialize PentestDriver: {e}",
               file=sys.stderr)
@@ -147,13 +146,10 @@ def create_mcp_server(task: str, flag: str, target: str) -> MCPServer:
 
 
 def main() -> None:
-    # Print to stderr only: stdout carries the stdio JSONRPC stream
+    # stderr only: stdout carries the stdio JSON-RPC stream
     print("Starting Pentest Driver MCP Server", file=sys.stderr)
 
-    # Parse command line arguments
     args = parse_args()
-
-    # Create and run the server with the provided arguments
     mcp = create_mcp_server(args.task, args.flag, args.target)
     mcp.run(transport="stdio")
 
