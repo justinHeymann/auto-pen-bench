@@ -66,13 +66,12 @@ lint:
 create:
 	@$(MAKE) create_structure CATEGORY=$(category) TASK_TYPE=$(task_type) VM=$(vm)
 
-# Helper function to pass the positional arguments
+# Helper that forwards positional args into create_structure.
 create_structure: 
 	@echo "Creating directories for $(CATEGORY), $(TASK_TYPE), $(VM)..."
 	@$(MAKE) $(MACHINES)/$(CATEGORY)/$(TASK_TYPE)/vm$(VM)/done CATEGORY=$(CATEGORY) TASK_TYPE=$(TASK_TYPE) VM=$(VM)
 
 
-# Check if CATEGORY folder exists, if not, create it
 $(MACHINES)/$(CATEGORY):
 	mkdir -p $(MACHINES)/$(CATEGORY)
 	mkdir -p $(CMD_MILESTONES)/$(CATEGORY)
@@ -80,7 +79,6 @@ $(MACHINES)/$(CATEGORY):
 	mkdir -p $(SOLUTIONS)/$(CATEGORY)
 
 
-# Check if TASK_TYPE folder exists inside CATEGORY, if not, create it
 $(MACHINES)/$(CATEGORY)/$(TASK_TYPE): $(MACHINES)/$(CATEGORY)
 	mkdir -p $(MACHINES)/$(CATEGORY)/$(TASK_TYPE)
 	mkdir -p $(CMD_MILESTONES)/$(CATEGORY)/$(TASK_TYPE)
@@ -90,38 +88,30 @@ $(MACHINES)/$(CATEGORY)/$(TASK_TYPE): $(MACHINES)/$(CATEGORY)
 	python3 setup/manage_docker_compose.py create $(BENCHMARK) $(CATEGORY) $(TASK_TYPE) $(VM)
 
 
-# Check if VM folder exists inside TASK_TYPE, if not, create it
 $(MACHINES)/$(CATEGORY)/$(TASK_TYPE)/vm$(VM): $(MACHINES)/$(CATEGORY)/$(TASK_TYPE)
-	# Create empty Dockerfile and flag for the machine to develop
 	mkdir -p $(MACHINES)/$(CATEGORY)/$(TASK_TYPE)/vm$(VM)
 	touch $(MACHINES)/$(CATEGORY)/$(TASK_TYPE)/vm$(VM)/flag.txt
 	touch $(MACHINES)/$(CATEGORY)/$(TASK_TYPE)/vm$(VM)/Dockerfile
-	
-	# Create empty files for milestones and solutions
+
 	touch $(CMD_MILESTONES)/$(CATEGORY)/$(TASK_TYPE)/vm$(VM).txt
 	touch $(STG_MILESTONES)/$(CATEGORY)/$(TASK_TYPE)/vm$(VM).txt
 	touch $(SOLUTIONS)/$(CATEGORY)/$(TASK_TYPE)/vm$(VM).txt
 
-	# Update the docker-compose with a default service
 	python3 setup/manage_docker_compose.py update $(BENCHMARK) $(CATEGORY) $(TASK_TYPE) $(VM)
-	# Update the input file
 	python3 setup/manage_input_data.py $(CATEGORY) $(TASK_TYPE) $(VM)
 
 
-# Final target to ensure VM exists and 'done' file is created
 $(MACHINES)/$(CATEGORY)/$(TASK_TYPE)/vm$(VM)/done: $(MACHINES)/$(CATEGORY)/$(TASK_TYPE)/vm$(VM)
 	@echo "All folders created. Doing final task in $(VM)..."
 
-# Positional parameters, taken from the words of MAKECMDGOALS that name no
-# goal: `make test ctf software 0` -> ctf software 0. Unlike fixed word
-# positions, this also holds when another goal comes first. A command-line
-# variable assignment (`make test category=ctf ...`) still wins, because `?=`
-# leaves an already-defined variable alone.
+# Positional args: words of MAKECMDGOALS that are not goals
+# (`make test ctf software 0` → ctf software 0). A command-line assignment
+# (`make test category=ctf ...`) still wins because `?=` leaves defined vars alone.
 ARGV := $(filter-out $(GOALS), $(MAKECMDGOALS))
 category ?= $(word 1, $(ARGV))
 task_type ?= $(word 2, $(ARGV))
 vm ?= $(word 3, $(ARGV))
 
-# Prevent 'create' from being confused with the folder names
+# Absorb leftover goal words so make does not treat folder names as targets.
 %:
 	@:
