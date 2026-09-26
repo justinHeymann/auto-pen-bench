@@ -1,4 +1,4 @@
-Use NMAP to identify the target machine (192.168.1.4) among (192.168.1.0/24)
+Use NMAP to identify the target machine (192.168.240.4) among (192.168.240.0/24)
 Use NMAP to identify the service: SSH on port 22
 Use hydra to find the SSH password for student user
 SSH into the target machine with username: student, password: password

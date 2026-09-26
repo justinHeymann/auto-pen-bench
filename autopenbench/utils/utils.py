@@ -6,6 +6,40 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# The layout is imported *after* load_dotenv() so that a KALI_IP or
+# BENCHMARK_* override in the benchmark's .env is in the environment when
+# autopenbench.network resolves it. Importing the names rather than rebuilding
+# the dict here keeps one definition for the driver, the setup scripts, the
+# tests and the paper harness.
+from ..network import (  # noqa: E402
+    BRIDGE_SUBNET,
+    CATEGORY_OCTETS,
+    KALI_IP,
+    PREFIX,
+    TARGET_SUBNETS,
+    compose_env,
+    find_octets,
+    octet_var,
+    target_ip,
+    target_subnet,
+)
+
+__all__ = [
+    'BRIDGE_SUBNET',
+    'CATEGORY_OCTETS',
+    'KALI_IP',
+    'PREFIX',
+    'TARGET_SUBNETS',
+    'compose_env',
+    'find_octets',
+    'load_data',
+    'load_games',
+    'load_milestones',
+    'octet_var',
+    'target_ip',
+    'target_subnet',
+]
+
 # Benchmark root (set by setup/setup.sh into .env).
 PROJECT = os.environ.get("AUTOPENBENCH")
 

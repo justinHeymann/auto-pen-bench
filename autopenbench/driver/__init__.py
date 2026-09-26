@@ -1,3 +1,13 @@
-from .pentest_driver import PentestDriver
+from .pentest_driver import (
+    PENTEST_COMPLETE_SUFFIX,
+    WIN_OBSERVATION,
+    WRONG_FLAG_OBSERVATION,
+    PentestDriver,
+)
 
-__all__ = ['PentestDriver']
+__all__ = [
+    'PENTEST_COMPLETE_SUFFIX',
+    'WIN_OBSERVATION',
+    'WRONG_FLAG_OBSERVATION',
+    'PentestDriver',
+]

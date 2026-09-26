@@ -7,6 +7,7 @@ from unittest.mock import Mock
 
 import pytest
 
+from autopenbench.network import PREFIX
 from autopenbench.shell import remote_shell as remote_shell_mod
 from autopenbench.shell.remote_shell import (
     RemoteShell,
@@ -14,7 +15,11 @@ from autopenbench.shell.remote_shell import (
     receive_data,
 )
 from autopenbench.tools import wait_for_message
+from autopenbench.utils import KALI_IP
 from support import (
+    CVE_SUBNET,
+    CVE_TARGET,
+    TARGET,
     ChunkedShell,
     EchoingShell,
     FakeShell,
@@ -60,8 +65,8 @@ def test_remote_shell_blocks_forbidden_network_tools():
         'bash -c "nc -l 1"',
         # Behind a shell keyword, where the separators leave the keyword as
         # the apparent program of the segment (`if nc ...; then id; fi`)
-        "if nc -z 192.168.1.0 22; then id; fi",
-        "while nc -z 192.168.1.0 22; do id; done",
+        f"if nc -z {TARGET} 22; then id; fi",
+        f"while nc -z {TARGET} 22; do id; done",
         "! nc -l 4444",
         # Inside a backquoted substitution, which the separators do not split
         "echo `nc -l 4444`",
@@ -78,8 +83,8 @@ def test_forbidden_net_tool_blocks_variants(cmd):
         "echo nc",
         "ls /usr/bin | grep socat",
         "which ncat",
-        "nmap -sV 192.168.1.0",
-        "sudo nmap -sV 192.168.1.0",
+        f"nmap -sV {TARGET}",
+        f"sudo nmap -sV {TARGET}",
         # A keyword segment must not turn its other tokens into programs:
         # only the token *after* the keyword is one.
         "if [ -f /tmp/socat ]; then id; fi",
@@ -200,10 +205,10 @@ def test_execute_cmd_reprobes_the_marker_at_a_metasploit_prompt():
     and was told nothing. Re-sending the marker at the console prompt -- which
     msfconsole executes through the shell like the first one -- is enough.
     """
-    shell = MsfConsoleShell(body='Nmap scan report for 192.168.5.0\n'
+    shell = MsfConsoleShell(body=f'Nmap scan report for {CVE_TARGET}\n'
                                  'Nmap done: 256 IP addresses (1 host up)')
 
-    out = RemoteShell(shell).execute_cmd('nmap -sn 192.168.5.0/24')
+    out = RemoteShell(shell).execute_cmd(f'nmap -sn {CVE_SUBNET}')
 
     assert 'Nmap done' in out
     assert 'interrupted' not in out
@@ -242,7 +247,7 @@ def test_execute_cmd_interrupts_a_command_that_outlives_its_deadline(monkeypatch
     remote = RemoteShell(shell)
 
     out = remote.execute_cmd(
-        "for i in {1..254}; do nmap -sn 192.168.$i.0/24; done"
+        f"for i in {{1..254}}; do nmap -sn {PREFIX}.$i.0/24; done"
     )
 
     assert "\x03" in shell.sent
@@ -454,7 +459,7 @@ def test_execute_cmd_interrupts_a_prompt_a_marker_command_cannot_answer(monkeypa
         remote_shell_mod.time, "monotonic", lambda: next(ticks)
     )
 
-    out = RemoteShell(shell).execute_cmd("ssh student@192.168.1.0")
+    out = RemoteShell(shell).execute_cmd(f"ssh student@{TARGET}")
 
     assert "\x03" in shell.sent
     assert "interrupted (Ctrl+C)" in out
@@ -467,7 +472,7 @@ def test_execute_cmd_reports_when_interrupt_cannot_be_sent():
             if value == "\x03":
                 raise OSError("Socket is closed")
 
-    shell = BrokenShell(output=b"student@192.168.1.0's password: ")
+    shell = BrokenShell(output=f"student@{TARGET}'s password: ".encode())
 
     out = RemoteShell(shell)._interrupt_foreground_process()
 
@@ -506,7 +511,7 @@ def test_the_last_session_banner_in_one_observation_decides():
     remote_shell = RemoteShell(FakeShell())
 
     assert remote_shell.check_metasploit_shell(
-        "\x1b[?2004lCommand shell session 1 opened (192.168.0.5:4444)\n"
+        f"\x1b[?2004lCommand shell session 1 opened ({KALI_IP}:4444)\n"
         "uid=0(root)\n"
         "Command shell session 1 closed. Reason: User exit\n"
     ) is False
@@ -530,7 +535,7 @@ def test_the_session_banner_is_seen_behind_the_images_hook_sequences():
     remote_shell = RemoteShell(FakeShell())
 
     assert remote_shell.check_metasploit_shell(
-        "\x1b[?2004lCommand shell session 1 opened (192.168.0.5:4444)"
+        f"\x1b[?2004lCommand shell session 1 opened ({KALI_IP}:4444)"
     ) is True
     assert remote_shell.session_kind == remote_shell_mod.COMMAND_SHELL_SESSION
 

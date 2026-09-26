@@ -5,10 +5,15 @@ from unittest.mock import Mock
 import pytest
 
 from autopenbench.driver import pentest_driver
-from autopenbench.driver.pentest_driver import PentestDriver
+from autopenbench.driver.pentest_driver import (
+    WIN_OBSERVATION,
+    WRONG_FLAG_OBSERVATION,
+    PentestDriver,
+)
 from autopenbench.shell.remote_shell import RemoteShell
 from autopenbench.tools import ExecuteBash, FinalAnswer, SSHConnect, WriteFile
-from support import FakeShell, MarkerShell
+from autopenbench.utils import KALI_IP
+from support import CVE_SUBNET, TARGET, FakeShell, MarkerShell
 
 
 class _ActionTimeout(TimeoutError):
@@ -31,7 +36,7 @@ def test_driver_requires_ssh_before_remote_commands():
     driver = PentestDriver("task", "flag", "target")
 
     output, done = driver.step(
-        ExecuteBash(machine_ipaddr="192.168.1.10", cmd="id")
+        ExecuteBash(machine_ipaddr=TARGET, cmd="id")
     )
 
     assert "need to" in output
@@ -42,10 +47,10 @@ def test_driver_routes_commands_to_registered_remote():
     driver = PentestDriver("task", "flag", "target")
     shell = Mock()
     shell.execute_cmd.return_value = "uid=0(root)"
-    driver.remotes["192.168.1.10"] = shell
+    driver.remotes[TARGET] = shell
 
     output, done = driver.step(
-        ExecuteBash(machine_ipaddr="192.168.1.10", cmd="id")
+        ExecuteBash(machine_ipaddr=TARGET, cmd="id")
     )
 
     shell.execute_cmd.assert_called_once_with("id")
@@ -83,7 +88,7 @@ def test_driver_reports_a_raising_tool_as_an_observation(monkeypatch):
     monkeypatch.setattr(SSHConnect, "run", _boom)
 
     out, done = driver.step(SSHConnect(
-        ssh_ipaddr="192.168.1.10", ssh_port=22,
+        ssh_ipaddr=TARGET, ssh_port=22,
         ssh_username="student", ssh_password="password",
     ))
 
@@ -102,7 +107,7 @@ def test_driver_reports_a_failed_kali_reconnect(monkeypatch):
     )
 
     out, done = driver.step(
-        ExecuteBash(machine_ipaddr="192.168.0.5", cmd="id")
+        ExecuteBash(machine_ipaddr=KALI_IP, cmd="id")
     )
 
     assert done is False
@@ -115,7 +120,7 @@ def test_driver_reports_a_failed_kali_reconnect(monkeypatch):
 def test_driver_only_registers_successful_ssh_connections(monkeypatch):
     driver = PentestDriver("task", "flag", "target")
     ssh_tool = SSHConnect(
-        ssh_ipaddr="192.168.1.10",
+        ssh_ipaddr=TARGET,
         ssh_port=22,
         ssh_username="student",
         ssh_password="password",
@@ -127,20 +132,20 @@ def test_driver_only_registers_successful_ssh_connections(monkeypatch):
     output, _ = driver.step(ssh_tool)
 
     assert output == "connection refused"
-    assert "192.168.1.10" not in driver.remotes
+    assert TARGET not in driver.remotes
 
 
 def test_driver_closes_the_session_it_replaces(monkeypatch):
     driver = PentestDriver("task", "flag", "target")
     previous = Mock()
     previous.is_alive.return_value = True
-    driver.remotes["192.168.1.10"] = previous
+    driver.remotes[TARGET] = previous
     monkeypatch.setattr(
         SSHConnect, "run", lambda _self, _ssh_kali: (FakeShell(), "connected")
     )
 
     driver.step(SSHConnect(
-        ssh_ipaddr="192.168.1.10", ssh_port=22,
+        ssh_ipaddr=TARGET, ssh_port=22,
         ssh_username="student", ssh_password="password",
     ))
 
@@ -154,7 +159,7 @@ def test_driver_reopens_kali_shell_when_the_channel_died(monkeypatch):
     driver = PentestDriver("task", "flag", "target")
     dead = FakeShell()
     dead.closed = True
-    driver.remotes["192.168.0.5"] = RemoteShell(dead)
+    driver.remotes[KALI_IP] = RemoteShell(dead)
 
     fresh = MarkerShell(body="uid=0(root)")
     monkeypatch.setattr(
@@ -165,11 +170,11 @@ def test_driver_reopens_kali_shell_when_the_channel_died(monkeypatch):
     monkeypatch.setattr(pentest_driver, "wait_for_message", lambda _shell: "")
 
     output, done = driver.step(
-        ExecuteBash(machine_ipaddr="192.168.0.5", cmd="id")
+        ExecuteBash(machine_ipaddr=KALI_IP, cmd="id")
     )
 
     assert "uid=0(root)" in output
-    assert driver.remotes["192.168.0.5"].shell is fresh
+    assert driver.remotes[KALI_IP].shell is fresh
     assert done is False
 
 
@@ -177,14 +182,14 @@ def test_driver_asks_the_agent_to_reconnect_a_dropped_remote_session():
     driver = PentestDriver("task", "flag", "target")
     dead = FakeShell()
     dead.closed = True
-    driver.remotes["192.168.1.10"] = RemoteShell(dead)
+    driver.remotes[TARGET] = RemoteShell(dead)
 
     output, _ = driver.step(
-        ExecuteBash(machine_ipaddr="192.168.1.10", cmd="id")
+        ExecuteBash(machine_ipaddr=TARGET, cmd="id")
     )
 
     assert "SSHConnect" in output
-    assert "192.168.1.10" not in driver.remotes
+    assert TARGET not in driver.remotes
 
 
 def test_driver_reconnects_kali_when_session_is_missing(monkeypatch):
@@ -199,11 +204,11 @@ def test_driver_reconnects_kali_when_session_is_missing(monkeypatch):
     )
 
     out, _ = driver.step(
-        ExecuteBash(machine_ipaddr="192.168.0.5", cmd="id")
+        ExecuteBash(machine_ipaddr=KALI_IP, cmd="id")
     )
 
     connect.assert_called_once()
-    assert "192.168.0.5" in driver.remotes
+    assert KALI_IP in driver.remotes
     assert out == "kali-output"
 
 
@@ -214,10 +219,10 @@ def test_driver_appends_sudo_hint_to_password_prompts():
     driver = PentestDriver("task", "flag", "target")
     shell = Mock()
     shell.execute_cmd.return_value = "x\n[sudo] password for student:"
-    driver.remotes["192.168.1.10"] = shell
+    driver.remotes[TARGET] = shell
 
     out, _ = driver.step(
-        ExecuteBash(machine_ipaddr="192.168.1.10", cmd="sudo id")
+        ExecuteBash(machine_ipaddr=TARGET, cmd="sudo id")
     )
 
     assert "interactive shell" in out
@@ -230,10 +235,10 @@ def test_driver_appends_hint_to_host_key_prompts():
     shell.execute_cmd.return_value = (
         "Are you sure you want to continue connecting (yes/no/[fingerprint])?"
     )
-    driver.remotes["192.168.1.10"] = shell
+    driver.remotes[TARGET] = shell
 
     out, _ = driver.step(
-        ExecuteBash(machine_ipaddr="192.168.1.10", cmd="ssh target")
+        ExecuteBash(machine_ipaddr=TARGET, cmd="ssh target")
     )
 
     assert "host-key prompt" in out
@@ -253,10 +258,10 @@ def test_driver_appends_the_session_hint_when_a_session_holds_the_shell():
     shell = Mock()
     shell.session_kind = "shell"
     shell.execute_cmd.return_value = "uid=0(root)"
-    driver.remotes["192.168.1.10"] = shell
+    driver.remotes[TARGET] = shell
 
     out, _ = driver.step(
-        ExecuteBash(machine_ipaddr="192.168.1.10", cmd="id")
+        ExecuteBash(machine_ipaddr=TARGET, cmd="id")
     )
 
     assert "session on the target" in out
@@ -269,10 +274,10 @@ def test_driver_keeps_the_msfconsole_hint_for_an_msfconsole_prompt():
     shell = Mock()
     shell.session_kind = None
     shell.execute_cmd.return_value = "msf6 >"
-    driver.remotes["192.168.1.10"] = shell
+    driver.remotes[TARGET] = shell
 
     out, _ = driver.step(
-        ExecuteBash(machine_ipaddr="192.168.1.10", cmd="id")
+        ExecuteBash(machine_ipaddr=TARGET, cmd="id")
     )
 
     assert "interactive msfconsole" in out
@@ -291,14 +296,14 @@ def test_driver_appends_the_msfconsole_hint_when_the_output_ends_with_a_newline(
     shell = Mock()
     shell.session_kind = None
     shell.execute_cmd.return_value = (
-        "nmap -sn 192.168.5.0/24\n"
+        f"nmap -sn {CVE_SUBNET}\n"
         "Nmap done: 256 IP addresses (1 host up) scanned in 9.75 seconds\n"
         "msf auxiliary(gather/x) > \n"
     )
-    driver.remotes["192.168.1.10"] = shell
+    driver.remotes[TARGET] = shell
 
     out, _ = driver.step(
-        ExecuteBash(machine_ipaddr="192.168.1.10", cmd="nmap -sn 192.168.5.0/24")
+        ExecuteBash(machine_ipaddr=TARGET, cmd=f"nmap -sn {CVE_SUBNET}")
     )
 
     assert "interactive msfconsole" in out
@@ -311,10 +316,10 @@ def test_driver_does_not_call_a_mention_of_msfconsole_a_console():
     shell = Mock()
     shell.session_kind = None
     shell.execute_cmd.return_value = "sh: 4: msfconsole: not found"
-    driver.remotes["192.168.1.10"] = shell
+    driver.remotes[TARGET] = shell
 
     out, _ = driver.step(
-        ExecuteBash(machine_ipaddr="192.168.1.10", cmd="msfconsole -q")
+        ExecuteBash(machine_ipaddr=TARGET, cmd="msfconsole -q")
     )
 
     assert "interactive msfconsole" not in out
@@ -326,10 +331,10 @@ def test_driver_appends_the_password_hint_when_the_prompt_is_the_last_line():
     shell = Mock()
     shell.session_kind = None
     shell.execute_cmd.return_value = "Password: \n"
-    driver.remotes["192.168.1.10"] = shell
+    driver.remotes[TARGET] = shell
 
     out, _ = driver.step(
-        ExecuteBash(machine_ipaddr="192.168.1.10", cmd="su - root")
+        ExecuteBash(machine_ipaddr=TARGET, cmd="su - root")
     )
 
     assert "interactive shell" in out
@@ -350,10 +355,10 @@ def test_driver_session_hint_keeps_the_target_reachable_through_kali():
     shell = Mock()
     shell.session_kind = "shell"
     shell.execute_cmd.return_value = "Command shell session 1 opened"
-    driver.remotes["192.168.1.10"] = shell
+    driver.remotes[TARGET] = shell
 
     out, _ = driver.step(
-        ExecuteBash(machine_ipaddr="192.168.1.10", cmd="run")
+        ExecuteBash(machine_ipaddr=TARGET, cmd="run")
     )
 
     assert "session on the target" in out
@@ -366,12 +371,12 @@ def test_driver_reports_no_session_once_the_session_is_gone():
     shell = Mock()
     shell.session_kind = "shell"
     shell.execute_cmd.return_value = "uid=0(root)"
-    driver.remotes["192.168.1.10"] = shell
-    driver.step(ExecuteBash(machine_ipaddr="192.168.1.10", cmd="id"))
+    driver.remotes[TARGET] = shell
+    driver.step(ExecuteBash(machine_ipaddr=TARGET, cmd="id"))
 
     shell.session_kind = None
     out, _ = driver.step(
-        ExecuteBash(machine_ipaddr="192.168.1.10", cmd="echo back-on-kali")
+        ExecuteBash(machine_ipaddr=TARGET, cmd="echo back-on-kali")
     )
 
     assert "session on the target" not in out
@@ -393,7 +398,7 @@ def test_driver_reraises_the_action_timeout_instead_of_observing_it(monkeypatch)
     monkeypatch.setattr(driver, "_run_tool", _timeout)
 
     with pytest.raises(TimeoutError):
-        driver.step(ExecuteBash(machine_ipaddr="192.168.0.5", cmd="id"))
+        driver.step(ExecuteBash(machine_ipaddr=KALI_IP, cmd="id"))
 
 
 def test_the_session_hint_is_not_appended_to_a_non_command_step(monkeypatch):
@@ -407,8 +412,8 @@ def test_the_session_hint_is_not_appended_to_a_non_command_step(monkeypatch):
     shell = Mock()
     shell.session_kind = "shell"
     shell.execute_cmd.return_value = "uid=0(root)"
-    driver.remotes["192.168.1.10"] = shell
-    driver.step(ExecuteBash(machine_ipaddr="192.168.1.10", cmd="id"))
+    driver.remotes[TARGET] = shell
+    driver.step(ExecuteBash(machine_ipaddr=TARGET, cmd="id"))
     monkeypatch.setattr(WriteFile, "run", lambda self: "saved")
 
     out, _ = driver.step(WriteFile(content="x", file_name="x.sh"))
@@ -427,7 +432,7 @@ def test_reset_releases_the_previous_remote_sessions(monkeypatch):
     """
     driver = PentestDriver("task", "flag", "target")
     stale = Mock()
-    driver.remotes["192.168.1.10"] = stale
+    driver.remotes[TARGET] = stale
     monkeypatch.setattr(driver, "start_containers", lambda: None)
     monkeypatch.setattr(driver, "_open_kali_shell", lambda: None)
 
@@ -445,7 +450,7 @@ def test_driver_accepts_matching_flag_and_truncates_long_submission():
 
     output, done = driver.step(FinalAnswer(flag="Abcdef1234567890-extra"))
 
-    assert output == "You Won!"
+    assert output == WIN_OBSERVATION
     assert done is True
 
 
@@ -454,7 +459,7 @@ def test_driver_rejects_wrong_flag():
 
     output, done = driver.step(FinalAnswer(flag="incorrect"))
 
-    assert output == "Wrong flag. Try again."
+    assert output == WRONG_FLAG_OBSERVATION
     assert done is False
 
 
@@ -463,12 +468,12 @@ def test_flag_normalization_truncates_and_strips():
 
     # Long flag with trailing text is accepted after normalization
     output, done = driver.step(FinalAnswer(flag="Abcdef1234567890-extra"))
-    assert output == "You Won!"
+    assert output == WIN_OBSERVATION
     assert done is True
 
     # Flag with whitespace is accepted
     output, done = driver.step(FinalAnswer(flag=" Abcdef1234567890 "))
-    assert output == "You Won!"
+    assert output == WIN_OBSERVATION
     assert done is True
 
 
@@ -482,7 +487,7 @@ def test_flag_length_is_configurable(monkeypatch):
     driver = PentestDriver("task", "A" * 24, "target")
     output, done = driver.step(FinalAnswer(flag="A" * 24 + "-extra"))
 
-    assert output == "You Won!"
+    assert output == WIN_OBSERVATION
     assert done is True
 
 
@@ -494,7 +499,7 @@ def test_flag_longer_than_the_configured_length_still_matches():
         FinalAnswer(flag=long_flag + " (trailing text)")
     )
 
-    assert (output, done) == ("You Won!", True)
+    assert (output, done) == (WIN_OBSERVATION, True)
 
 
 def test_flag_is_stripped_when_it_is_loaded():
@@ -506,7 +511,7 @@ def test_flag_is_stripped_when_it_is_loaded():
     driver = PentestDriver("task", "  Abcdef1234567890\t", "target")
 
     assert driver.flag == "Abcdef1234567890"
-    assert driver.step(FinalAnswer(flag="Abcdef1234567890")) == ("You Won!", True)
+    assert driver.step(FinalAnswer(flag="Abcdef1234567890")) == (WIN_OBSERVATION, True)
 
 
 def test_flag_length_below_the_flag_length_warns_once(monkeypatch, capsys):
@@ -520,7 +525,7 @@ def test_flag_length_below_the_flag_length_warns_once(monkeypatch, capsys):
     driver = PentestDriver("task", "Abcdef1234567890", "target")
 
     # A wrong submission sharing the first 4 characters matches, as documented.
-    assert driver.step(FinalAnswer(flag="Abcd-wrong-tail")) == ("You Won!", True)
+    assert driver.step(FinalAnswer(flag="Abcd-wrong-tail")) == (WIN_OBSERVATION, True)
     # A second submission must not repeat the warning.
     driver.step(FinalAnswer(flag="Abcd"))
 

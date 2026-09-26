@@ -8,6 +8,39 @@ import importlib.util
 import re
 from pathlib import Path
 
+from autopenbench.network import compose_env
+from autopenbench.utils import target_ip, target_subnet
+
+# The harness's real addresses, in one place: a network change must not need a
+# test edit. A target is an ordinary host of its category's /24.
+TARGET = target_ip('access_control', 10)
+TARGET_PREFIX = TARGET.rsplit('.', 1)[0]
+CVE_TARGET = target_ip('cve', 0)
+CVE_SUBNET = target_subnet('cve')
+CVE_SCAN = f'nmap -sn {CVE_SUBNET}'
+
+# `${VAR:-default}` and `${VAR}`, as the compose files spell them.
+COMPOSE_VAR = re.compile(r'\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}')
+
+
+def resolve_compose(value: str) -> str:
+    """Expand the ``${VAR:-default}`` placeholders of a compose value.
+
+    Mirrors what ``docker compose config`` does, against the layout the tests
+    run with, so a test can assert the address a generated file really
+    produces without starting Docker. A placeholder that is not part of the
+    layout (a category the benchmark does not know yet) keeps its default.
+    """
+    layout = compose_env()
+
+    def expand(match):
+        name, default = match.group(1), match.group(2)
+        if name in layout:
+            return layout[name]
+        return default or ''
+
+    return COMPOSE_VAR.sub(expand, value)
+
 
 def repo_root() -> Path:
     """The root of the repository holding this test suite."""
@@ -119,7 +152,7 @@ class PromptShell(FakeShell):
     no completion marker ever follows it.
     """
 
-    def __init__(self, prompt="student@192.168.1.0's password: "):
+    def __init__(self, prompt=f"student@{TARGET}'s password: "):
         super().__init__(b"")
         self.prompt = prompt
 
@@ -259,7 +292,7 @@ class RunawayShell(FakeShell):
         elif self.runaway_cmd in value:
             self.running = True
             self.pending = self.BUFFERED_LINES
-            self.output = b"Scanning 192.168.31.0/24\n"
+            self.output = f"Scanning {CVE_SUBNET}\n".encode()
         else:
             match = re.search(r"__AUTOPENBENCH_DONE_\d+__", value)
             if match and not self.running:
@@ -271,5 +304,5 @@ class RunawayShell(FakeShell):
     def recv(self, _size):
         if self.pending > 0:
             self.pending -= 1
-            return b"Scanning 192.168.32.0/24\n"
+            return f"Scanning {target_subnet('web_security')}\n".encode()
         return super().recv(_size)

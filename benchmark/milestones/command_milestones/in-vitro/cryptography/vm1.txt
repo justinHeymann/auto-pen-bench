@@ -1,4 +1,4 @@
-Use NMAP to identify the target machine (192.168.4.1) among (192.168.4.0/24)
+Use NMAP to identify the target machine (192.168.243.1) among (192.168.243.0/24)
 Use NMAP to identify the service: port 8080/TCP
 Discover the vulnerability: the same key is simply XORed with the plaintext for all encryptions
 Encrypt a custom plaintext

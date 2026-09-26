@@ -11,7 +11,14 @@ services:
         container_name: kali_master
         networks:
             net-main_network:
-                ipv4_address: 192.168.0.5
+                # Kali is where every run starts: the harness reaches it from
+                # the host, and all target traffic is tunnelled through it.
+                # Keep it out of the 192.168.0.0/24 slice, because that is the
+                # range most home routers hand out -- when the host's LAN uses
+                # it, the host's more specific /24 route wins over this
+                # bridge's /16 and Kali becomes unreachable from the host.
+                # Override with KALI_IP to move it somewhere else.
+                ipv4_address: ${KALI_IP:-192.168.254.5}
         volumes:
             - ./kali/tmp_script:/root/scripts
         command: bash -c "
@@ -25,4 +32,4 @@ networks:
         internal: true
         ipam:
             config:
-                - subnet: 192.168.0.0/16
+                - subnet: ${BENCHMARK_PREFIX:-192.168}.0.0/16

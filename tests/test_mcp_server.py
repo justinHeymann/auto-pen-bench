@@ -7,6 +7,8 @@ from unittest.mock import Mock
 
 import pytest
 
+from autopenbench.utils import KALI_IP
+
 
 def _registered_tool(server, name):
     """Best-effort lookup of a registered FastMCP tool callable."""
@@ -59,7 +61,7 @@ def test_mcp_tools_report_a_missing_session(monkeypatch):
     if tool is None:
         pytest.skip("FastMCP internals not accessible in this version")
 
-    contents = asyncio.run(tool(machine_ipaddr="192.168.0.5", cmd="id"))
+    contents = asyncio.run(tool(machine_ipaddr=KALI_IP, cmd="id"))
 
     assert contents[0].text == mcp_mod._NO_SESSION_MESSAGE
 
@@ -73,7 +75,7 @@ def test_mcp_tools_report_driver_failures_as_text(monkeypatch):
     if tool is None:
         pytest.skip("FastMCP internals not accessible in this version")
 
-    contents = asyncio.run(tool(machine_ipaddr="192.168.0.5", cmd="id"))
+    contents = asyncio.run(tool(machine_ipaddr=KALI_IP, cmd="id"))
 
     assert "Error executing command" in contents[0].text
     assert "channel exploded" in contents[0].text
@@ -98,4 +100,4 @@ def test_mcp_tools_let_the_action_timeout_reach_the_caller(monkeypatch):
         pytest.skip("FastMCP internals not accessible in this version")
 
     with pytest.raises(TimeoutError):
-        asyncio.run(tool(machine_ipaddr="192.168.0.5", cmd="nmap -sn 10.0.0.0/24"))
+        asyncio.run(tool(machine_ipaddr=KALI_IP, cmd="nmap -sn 10.0.0.0/24"))

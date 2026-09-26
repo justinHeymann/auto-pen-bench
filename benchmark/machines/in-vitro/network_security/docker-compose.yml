@@ -14,7 +14,7 @@ services:
             - NET_ADMIN        
         networks:
             net-main_network:
-                ipv4_address: 192.168.3.0
+                ipv4_address: ${BENCHMARK_PREFIX:-192.168}.${NETWORK_SECURITY_OCTET:-242}.0
         restart: unless-stopped
         command: bash -c "
                     /etc/firewall.sh &&
@@ -35,7 +35,7 @@ services:
             - NET_ADMIN        
         networks:
             net-main_network:
-                ipv4_address: 192.168.3.1
+                ipv4_address: ${BENCHMARK_PREFIX:-192.168}.${NETWORK_SECURITY_OCTET:-242}.1
         restart: unless-stopped
         command: bash -c "
                     /etc/firewall.sh &&
@@ -56,7 +56,7 @@ services:
             - NET_ADMIN        
         networks:
             net-main_network:
-                ipv4_address: 192.168.3.2
+                ipv4_address: ${BENCHMARK_PREFIX:-192.168}.${NETWORK_SECURITY_OCTET:-242}.2
         restart: unless-stopped
         command: bash -c "
                     /etc/firewall.sh &&
@@ -77,7 +77,7 @@ services:
             - NET_ADMIN        
         networks:
             net-main_network:
-                ipv4_address: 192.168.3.3
+                ipv4_address: ${BENCHMARK_PREFIX:-192.168}.${NETWORK_SECURITY_OCTET:-242}.3
         restart: unless-stopped
         command: bash -c "
                     /etc/firewall.sh &&
@@ -98,7 +98,7 @@ services:
             - NET_ADMIN        
         networks:
             net-main_network:
-                ipv4_address: 192.168.3.4
+                ipv4_address: ${BENCHMARK_PREFIX:-192.168}.${NETWORK_SECURITY_OCTET:-242}.4
         restart: unless-stopped
         command: bash -c "
                     /etc/firewall.sh &&
@@ -121,7 +121,7 @@ services:
             - NET_ADMIN
         networks:
             net-main_network:
-                ipv4_address: 192.168.3.5
+                ipv4_address: ${BENCHMARK_PREFIX:-192.168}.${NETWORK_SECURITY_OCTET:-242}.5
         restart: unless-stopped
         command: bash -c "
                     /etc/firewall.sh &&
@@ -143,7 +143,7 @@ services:
             - NET_ADMIN
         networks:
             net-main_network:
-                ipv4_address: 192.168.3.250
+                ipv4_address: ${BENCHMARK_PREFIX:-192.168}.${NETWORK_SECURITY_OCTET:-242}.250
         restart: unless-stopped
         command: bash -c "
                     /etc/firewall.sh &&
@@ -155,4 +155,4 @@ networks:
         internal: true
         ipam:
             config:
-                - subnet: 192.168.0.0/16
+                - subnet: ${BENCHMARK_PREFIX:-192.168}.0.0/16

@@ -1,7 +1,7 @@
 <?php
 // db.php
 
-$servername = "192.168.2.254";
+$servername = "192.168.241.254";
 $username = "app";
 $password = "securepass";      
 $dbname = "users"; 

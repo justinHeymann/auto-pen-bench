@@ -12,7 +12,7 @@ services:
         init: true
         networks:
             net-main_network:
-                ipv4_address: 192.168.2.0
+                ipv4_address: ${BENCHMARK_PREFIX:-192.168}.${WEB_SECURITY_OCTET:-241}.0
         restart: unless-stopped
         command: bash -c "
                     php -S 0.0.0.0:80 && 
@@ -30,7 +30,7 @@ services:
         init: true
         networks:
             net-main_network:
-                ipv4_address: 192.168.2.1
+                ipv4_address: ${BENCHMARK_PREFIX:-192.168}.${WEB_SECURITY_OCTET:-241}.1
         restart: unless-stopped
         command: bash -c "
                     php -S 0.0.0.0:80 && 
@@ -48,7 +48,7 @@ services:
         init: true
         networks:
             net-main_network:
-                ipv4_address: 192.168.2.2
+                ipv4_address: ${BENCHMARK_PREFIX:-192.168}.${WEB_SECURITY_OCTET:-241}.2
         restart: unless-stopped
         command: bash -c "
                     php -S 0.0.0.0:80 && 
@@ -68,7 +68,7 @@ services:
         init: true
         networks:
             net-main_network:
-                ipv4_address: 192.168.2.3
+                ipv4_address: ${BENCHMARK_PREFIX:-192.168}.${WEB_SECURITY_OCTET:-241}.3
         restart: unless-stopped
         command: bash -c "
                     php -S 0.0.0.0:80 &&
@@ -85,7 +85,7 @@ services:
         restart: always
         networks:
             net-main_network:
-                ipv4_address: 192.168.2.255
+                ipv4_address: ${BENCHMARK_PREFIX:-192.168}.${WEB_SECURITY_OCTET:-241}.255
         environment:
             MYSQL_ROOT_PASSWORD: root
         volumes:
@@ -102,7 +102,7 @@ services:
         init: true
         networks:
             net-main_network:
-                ipv4_address: 192.168.2.4
+                ipv4_address: ${BENCHMARK_PREFIX:-192.168}.${WEB_SECURITY_OCTET:-241}.4
         ports:
             - 8080:80
         restart: unless-stopped
@@ -124,7 +124,7 @@ services:
                 - SYS_NICE 
         networks:
             net-main_network:
-                ipv4_address: 192.168.2.254
+                ipv4_address: ${BENCHMARK_PREFIX:-192.168}.${WEB_SECURITY_OCTET:-241}.254
 
     in-vitro_web_security_vm5:
         security_opt:
@@ -137,7 +137,7 @@ services:
         init: true
         networks:
             net-main_network:
-                ipv4_address: 192.168.2.5
+                ipv4_address: ${BENCHMARK_PREFIX:-192.168}.${WEB_SECURITY_OCTET:-241}.5
         restart: unless-stopped
         volumes:
             - ./in-vitro/web_security/vm5/flag.txt:/flag.txt  
@@ -156,7 +156,7 @@ services:
         init: true
         networks:
             net-main_network:
-                ipv4_address: 192.168.2.6
+                ipv4_address: ${BENCHMARK_PREFIX:-192.168}.${WEB_SECURITY_OCTET:-241}.6
         restart: unless-stopped
         volumes:
             - ./in-vitro/web_security/vm6/flag.txt:/flag.txt  
@@ -183,7 +183,7 @@ services:
         init: true
         networks:
             net-main_network:
-                ipv4_address: 192.168.2.0
+                ipv4_address: ${BENCHMARK_PREFIX:-192.168}.${WEB_SECURITY_OCTET:-241}.0
         restart: unless-stopped
         command: bash -c "
                     php -S 0.0.0.0:80 &&
@@ -201,7 +201,7 @@ services:
         init: true
         networks:
             net-main_network:
-                ipv4_address: 192.168.2.0
+                ipv4_address: ${BENCHMARK_PREFIX:-192.168}.${WEB_SECURITY_OCTET:-241}.0
         restart: unless-stopped
         command: bash -c "
                     php -S 0.0.0.0:80 &&
@@ -220,7 +220,7 @@ services:
         init: true
         networks:
             net-main_network:
-                ipv4_address: 192.168.2.1
+                ipv4_address: ${BENCHMARK_PREFIX:-192.168}.${WEB_SECURITY_OCTET:-241}.1
         restart: unless-stopped
         command: bash -c "
                     php -S 0.0.0.0:80 &&
@@ -238,7 +238,7 @@ services:
         init: true
         networks:
             net-main_network:
-                ipv4_address: 192.168.2.1
+                ipv4_address: ${BENCHMARK_PREFIX:-192.168}.${WEB_SECURITY_OCTET:-241}.1
         restart: unless-stopped
         command: bash -c "
                     php -S 0.0.0.0:80 &&
@@ -259,7 +259,7 @@ services:
         init: true
         networks:
             net-main_network:
-                ipv4_address: 192.168.2.240
+                ipv4_address: ${BENCHMARK_PREFIX:-192.168}.${WEB_SECURITY_OCTET:-241}.240
         restart: unless-stopped
         volumes:
             - ./in-vitro/web_security/endpoint_logs/vm1inj:/logs
@@ -275,7 +275,7 @@ services:
         init: true
         networks:
             net-main_network:
-                ipv4_address: 192.168.2.2
+                ipv4_address: ${BENCHMARK_PREFIX:-192.168}.${WEB_SECURITY_OCTET:-241}.2
         restart: unless-stopped
         command: bash -c "
                     php -S 0.0.0.0:80 &&
@@ -293,7 +293,7 @@ services:
         init: true
         networks:
             net-main_network:
-                ipv4_address: 192.168.2.2
+                ipv4_address: ${BENCHMARK_PREFIX:-192.168}.${WEB_SECURITY_OCTET:-241}.2
         restart: unless-stopped
         command: bash -c "
                     php -S 0.0.0.0:80 &&
@@ -312,7 +312,7 @@ services:
         init: true
         networks:
             net-main_network:
-                ipv4_address: 192.168.2.241
+                ipv4_address: ${BENCHMARK_PREFIX:-192.168}.${WEB_SECURITY_OCTET:-241}.241
         restart: unless-stopped
         volumes:
             - ./in-vitro/web_security/endpoint_logs/vm2inj:/logs
@@ -328,7 +328,7 @@ services:
         init: true
         networks:
             net-main_network:
-                ipv4_address: 192.168.2.3
+                ipv4_address: ${BENCHMARK_PREFIX:-192.168}.${WEB_SECURITY_OCTET:-241}.3
         restart: unless-stopped
         # Same command as the original: without it the overlay would fall back
         # to the image's default entrypoint (Apache) and the three conditions
@@ -349,7 +349,7 @@ services:
         init: true
         networks:
             net-main_network:
-                ipv4_address: 192.168.2.3
+                ipv4_address: ${BENCHMARK_PREFIX:-192.168}.${WEB_SECURITY_OCTET:-241}.3
         restart: unless-stopped
         # Same command as the original: without it the overlay would fall back
         # to the image's default entrypoint (Apache) and the three conditions
@@ -366,4 +366,4 @@ networks:
         internal: true
         ipam:
             config:
-                - subnet: 192.168.0.0/16
+                - subnet: ${BENCHMARK_PREFIX:-192.168}.0.0/16

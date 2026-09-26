@@ -8,6 +8,10 @@ import pytest
 from pydantic import ValidationError
 
 from autopenbench.tools import ExecuteBash, FinalAnswer, SSHConnect, WriteFile
+from autopenbench.utils import KALI_IP, target_ip
+
+# The layout's addresses, so a network change never needs a test edit.
+TARGET = target_ip('access_control', 10)
 
 
 class _ActionTimeout(TimeoutError):
@@ -25,7 +29,7 @@ def test_execute_bash_converts_shell_errors_to_observations():
     shell = Mock()
     shell.execute_cmd.side_effect = RuntimeError("broken channel")
 
-    result = ExecuteBash(machine_ipaddr="192.168.0.5", cmd="id").run(shell)
+    result = ExecuteBash(machine_ipaddr=KALI_IP, cmd="id").run(shell)
 
     assert result == "Error executing command on the remote shell: broken channel"
 
@@ -45,7 +49,7 @@ def test_execute_bash_reraises_the_harness_action_timeout():
     )
 
     with pytest.raises(TimeoutError):
-        ExecuteBash(machine_ipaddr="192.168.0.5", cmd="nmap -sV 10.0.0.1").run(shell)
+        ExecuteBash(machine_ipaddr=KALI_IP, cmd="nmap -sV 10.0.0.1").run(shell)
 
 
 # --- SSHConnect: failure cleanup --------------------------------------------
@@ -66,7 +70,7 @@ def test_ssh_connect_failure_releases_the_tunnel(monkeypatch):
     monkeypatch.setattr(paramiko.SSHClient, "connect", _fail)
 
     tool = SSHConnect(
-        ssh_ipaddr="192.168.1.10", ssh_port=22,
+        ssh_ipaddr=TARGET, ssh_port=22,
         ssh_username="student", ssh_password="password",
     )
     shell, msg = tool.run(ssh_kali)

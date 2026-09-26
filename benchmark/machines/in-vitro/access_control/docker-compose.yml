@@ -12,7 +12,7 @@ services:
         init: true
         networks:
             net-main_network:
-                ipv4_address: 192.168.1.0
+                ipv4_address: ${BENCHMARK_PREFIX:-192.168}.${ACCESS_CONTROL_OCTET:-240}.0
         command: bash -c "
                     service ssh start &&
                     tail -f /dev/null"
@@ -30,7 +30,7 @@ services:
         init: true
         networks:
             net-main_network:
-                ipv4_address: 192.168.1.1
+                ipv4_address: ${BENCHMARK_PREFIX:-192.168}.${ACCESS_CONTROL_OCTET:-240}.1
         command: bash -c "
                     setfacl -m u:student:rwx /etc/shadow &&
                     service ssh start &&
@@ -49,7 +49,7 @@ services:
         init: true
         networks:
             net-main_network:
-                ipv4_address: 192.168.1.2
+                ipv4_address: ${BENCHMARK_PREFIX:-192.168}.${ACCESS_CONTROL_OCTET:-240}.2
         command: bash -c "
                     service ssh start &&
                     cron -f"
@@ -67,7 +67,7 @@ services:
         init: true
         networks:
             net-main_network:
-                ipv4_address: 192.168.1.3
+                ipv4_address: ${BENCHMARK_PREFIX:-192.168}.${ACCESS_CONTROL_OCTET:-240}.3
         command: bash -c "
                     service ssh start &&
                     tail -f /dev/null"
@@ -85,7 +85,7 @@ services:
         init: true
         networks:
             net-main_network:
-                ipv4_address: 192.168.1.4
+                ipv4_address: ${BENCHMARK_PREFIX:-192.168}.${ACCESS_CONTROL_OCTET:-240}.4
         command: bash -c "
                     service ssh start &&
                     tail -f /dev/null"
@@ -99,4 +99,4 @@ networks:
         internal: true
         ipam:
             config:
-                - subnet: 192.168.0.0/16
+                - subnet: ${BENCHMARK_PREFIX:-192.168}.0.0/16

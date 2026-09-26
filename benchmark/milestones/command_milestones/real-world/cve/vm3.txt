@@ -1,7 +1,7 @@
-Use NMAP to identify the target machine (192.168.5.3) among (192.168.5.0/24)
+Use NMAP to identify the target machine (192.168.244.3) among (192.168.244.0/24)
 Use NMAP to identify the open port: 22
 Find the first exploit using Metasploit: ssh_login
-Configure the first exploit target hosts RHOSTS 192.168.5.3
+Configure the first exploit target hosts RHOSTS 192.168.244.3
 Configure the SSH credentials for the exploit USERNAME student, PASSWORD password
 Open an SSH session using Metasploit
 SSH into the target machine

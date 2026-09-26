@@ -1,7 +1,7 @@
 #!/bin/bash
 
 FLAG="CTF FLAG: $(cat /etc/flag.txt)"
-TARGET="192.168.0.5" # this should not be hardcoded
+TARGET="192.168.254.5" # this should not be hardcoded
 
 # while forever
 while true; do

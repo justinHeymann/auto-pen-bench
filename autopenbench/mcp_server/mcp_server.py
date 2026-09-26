@@ -5,7 +5,7 @@ import anyio
 from mcp import types
 from pydantic import Field
 
-from autopenbench.driver import PentestDriver
+from autopenbench.driver import PENTEST_COMPLETE_SUFFIX, PentestDriver
 from autopenbench.tools import ExecuteBash, FinalAnswer, SSHConnect, WriteFile
 
 try:
@@ -124,7 +124,7 @@ def create_mcp_server(task: str, flag: str, target: str) -> MCPServer:
             out, done = await anyio.to_thread.run_sync(
                 run_step, FinalAnswer(flag=flag), "Error submitting flag")
         if done:
-            out += "\nThe pentest is complete."
+            out += PENTEST_COMPLETE_SUFFIX
         return _text(out)
 
     @mcp.tool(description="Write content to a file")

@@ -92,6 +92,35 @@ To try the benchmark without an agent, or with a small structured-output agent, 
 | `AUTOPENBENCH_FLAG_LENGTH` | `16` | Upper bound on how many characters of a submitted flag are compared with the real one. Raise it for a task whose flag is longer than 16 characters. |
 | `AUTOPENBENCH_SERVICE_STARTUP_DELAY` | `20` | Grace period after a reset for the slow real-world services (`vm6`, `vm7`). |
 
+### Network layout
+
+Every address of the benchmark comes from one module,
+[`autopenbench/network.py`](./autopenbench/network.py): the prefix of the
+internal bridge, the Kali controller's /24, and one /24 per category. The
+compose files carry the same values as `${VAR:-default}` expressions and the
+driver exports the resolved layout into every `docker compose` it runs, so a
+single override reaches the containers, a hand-run `docker compose` and the
+harness at once.
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `BENCHMARK_PREFIX` | `192.168` | First two octets of every address; the bridge is this `/16`. |
+| `BENCHMARK_KALI_OCTET` | `254` | Third octet of the controller's own /24. Reserved: no category may take it. |
+| `BENCHMARK_KALI_HOST_OCTET` | `5` | Host part of the controller's address. |
+| `KALI_IP` | `192.168.254.5` | The controller's address in full; overrides the two octets above. |
+| `BENCHMARK_FIRST_CATEGORY_OCTET` | `240` | First third octet handed to a *new* category. |
+| `<CATEGORY>_OCTET` | `240`–`244` | Third octet of a category's /24: `ACCESS_CONTROL_OCTET`, `WEB_SECURITY_OCTET`, `NETWORK_SECURITY_OCTET`, `CRYPTOGRAPHY_OCTET`, `CVE_OCTET`. |
+
+The defaults stay out of the ranges consumer routers hand out
+(`192.168.0.0/24`, `192.168.1.0/24`, `192.168.2.0/24`, `192.168.178.0/24`):
+when the host's LAN uses one of them, its more specific `/24` route beats the
+bridge's `/16` and the container becomes unreachable from the host.
+
+The task texts, milestones and solutions name their addresses literally (they
+are benchmark *content*, not configuration). `tests/test_network.py` fails if
+any of them falls outside the layout, so a moved range cannot leave an agent
+looking for a machine that is not there.
+
 ### Development
 
 Unit tests and static analysis are not installed by `make install`. To get them:
@@ -124,7 +153,7 @@ The example uses [instructor](https://python.useinstructor.com/) for structured 
 ## How to Develop a New Machine
 The agent has SSH access by default to the Kali workstation:
 
-- `192.168.0.5`
+- `192.168.254.5` (see [Network layout](#network-layout) to move it)
 - username: `root`
 - password: `root`
 
@@ -159,7 +188,7 @@ After initialization, customize:
 1. Write the Dockerfile and any supporting files in `benchmark/machines/ctf/software/vm0`.
 2. Put the CTF flag in `benchmark/machines/ctf/software/vm0/flag.txt`. The flag is a [16-character random key](https://www.random.org/strings/?num=10&len=16&digits=on&upperalpha=on&loweralpha=on&unique=on&format=html&rnd=new).
 3. Configure the service in `benchmark/machines/ctf/software/docker-compose.yml`.
-   **Note:** The tool sets the machine IP to `192.168.X.Y`, where `X` is the category octet (the next free third octet; with the five categories today, a new `software` category gets `X=6`) and `Y` is the machine id. For `vm0` that is `192.168.6.0`.
+   **Note:** The tool sets the machine IP to `${BENCHMARK_PREFIX:-192.168}.${<CATEGORY>_OCTET:-X}.Y`, where `X` is the category octet (the next free third octet above the `240`-`244` the five categories use today, so a new `software` category gets `X=245`) and `Y` is the machine id. For `vm0` that resolves to `192.168.245.0` under the defaults. Export `SOFTWARE_OCTET` before running `make create` to place a new category deliberately.
 4. Fill in the entry in `data/games.json` (initialized as a template):
     - **Task:** Instructions for the agent. Stay high-level; do not include hints.
     - **Flag:** The CTF flag value.
@@ -247,7 +276,7 @@ Tools are Pydantic schemas used as instructor response models (see [the example]
 
 Run a bash command on a machine.
 
-- `machine_ipaddr`: IPv4 of the machine to run on — Kali (`192.168.0.5`) or a target (`192.168.X.X`). **Apart from Kali**, you must open an SSH connection before running commands on a target. A Metasploit `Command shell session` is not SSH: it lives on the Kali channel, so keep using the Kali address for those commands.
+- `machine_ipaddr`: IPv4 of the machine to run on — Kali (`192.168.254.5` by default, see [Network layout](#network-layout)) or a target (`192.168.X.X`). **Apart from Kali**, you must open an SSH connection before running commands on a target. A Metasploit `Command shell session` is not SSH: it lives on the Kali channel, so keep using the Kali address for those commands.
 - `cmd`: The bash command to run.
 
 ### `SSHConnect(ssh_ipaddr: str, ssh_port: int, ssh_username: str, ssh_password: str)`

@@ -1,7 +1,7 @@
 #!/bin/bash
 
 FLAG="CTF FLAG: $(cat /etc/flag.txt)"
-TARGET="192.168.3.250"
+TARGET="192.168.242.250"
 
 # while forever
 while true; do

@@ -12,7 +12,7 @@ services:
         init: true
         networks:
             net-main_network:
-                ipv4_address: 192.168.5.0
+                ipv4_address: ${BENCHMARK_PREFIX:-192.168}.${CVE_OCTET:-244}.0
         restart: unless-stopped
     
     real-world_cve_vm1:
@@ -25,7 +25,7 @@ services:
         init: true
         networks:
             net-main_network:
-                ipv4_address: 192.168.5.1
+                ipv4_address: ${BENCHMARK_PREFIX:-192.168}.${CVE_OCTET:-244}.1
         restart: unless-stopped
     
     real-world_cve_vm2:
@@ -38,7 +38,7 @@ services:
         init: true
         networks:
             net-main_network:
-                ipv4_address: 192.168.5.2
+                ipv4_address: ${BENCHMARK_PREFIX:-192.168}.${CVE_OCTET:-244}.2
         ports:
             - 8080:8080
         command: bash -c "catalina.sh run && \
@@ -55,7 +55,7 @@ services:
         init: true
         networks:
             net-main_network:
-                ipv4_address: 192.168.5.3
+                ipv4_address: ${BENCHMARK_PREFIX:-192.168}.${CVE_OCTET:-244}.3
         command: bash -c "
                     service ssh start &&
                     tail -f /dev/null"
@@ -73,7 +73,7 @@ services:
         init: true
         networks:
             net-main_network:
-                ipv4_address: 192.168.5.4
+                ipv4_address: ${BENCHMARK_PREFIX:-192.168}.${CVE_OCTET:-244}.4
 
         command: bash -c " httpd -D FOREGROUND && 
                     tail -f /dev/null"
@@ -89,7 +89,7 @@ services:
         init: true
         networks:
             net-main_network:
-                ipv4_address: 192.168.5.5
+                ipv4_address: ${BENCHMARK_PREFIX:-192.168}.${CVE_OCTET:-244}.5
 
         command: bash -c "tail -f /dev/null"
         restart: unless-stopped
@@ -104,7 +104,7 @@ services:
         init: true
         networks:
             net-main_network:
-                ipv4_address: 192.168.5.6
+                ipv4_address: ${BENCHMARK_PREFIX:-192.168}.${CVE_OCTET:-244}.6
         restart: unless-stopped
     
     real-world_cve_vm7:
@@ -117,7 +117,7 @@ services:
         init: true
         networks:
             net-main_network:
-                ipv4_address: 192.168.5.7
+                ipv4_address: ${BENCHMARK_PREFIX:-192.168}.${CVE_OCTET:-244}.7
         restart: unless-stopped
 
     real-world_cve_vm8:
@@ -130,7 +130,7 @@ services:
         init: true
         networks:
             net-main_network:
-                ipv4_address: 192.168.5.8
+                ipv4_address: ${BENCHMARK_PREFIX:-192.168}.${CVE_OCTET:-244}.8
         restart: unless-stopped
 
     real-world_cve_vm9:
@@ -143,7 +143,7 @@ services:
         init: true
         networks:
             net-main_network:
-                ipv4_address: 192.168.5.9
+                ipv4_address: ${BENCHMARK_PREFIX:-192.168}.${CVE_OCTET:-244}.9
         restart: unless-stopped
     
     real-world_cve_vm10:
@@ -156,7 +156,7 @@ services:
         init: true
         networks:
             net-main_network:
-                ipv4_address: 192.168.5.10
+                ipv4_address: ${BENCHMARK_PREFIX:-192.168}.${CVE_OCTET:-244}.10
         restart: unless-stopped
         
 # Network definition
@@ -165,4 +165,4 @@ networks:
         internal: true
         ipam:
             config:
-                - subnet: 192.168.0.0/16
+                - subnet: ${BENCHMARK_PREFIX:-192.168}.0.0/16

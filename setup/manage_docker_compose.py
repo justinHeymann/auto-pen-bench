@@ -1,9 +1,39 @@
 import argparse
 import os
-import re
 from glob import glob
 
 import yaml
+
+from autopenbench.network import (
+    CATEGORY_OCTETS,
+    FIRST_CATEGORY_OCTET,
+    KALI_OCTET,
+    PREFIX,
+    find_octets,
+    octet_var,
+)
+
+# The generator writes the same ``${VAR:-default}`` expression the checked-in
+# compose files carry, never a resolved literal. A generated machine therefore
+# follows the central layout (and any override of it) exactly like a
+# hand-written one, and the spelling of an address stays in one file.
+PREFIX_EXPR = f'${{BENCHMARK_PREFIX:-{PREFIX}}}'
+SUBNET_EXPR = f'{PREFIX_EXPR}.0.0/16'
+
+
+def address_expr(category: str, machine_id, octet=None) -> str:
+    """One machine's ``ipv4_address``, as the compose file spells it.
+
+    ``octet`` is the category's third octet; it defaults to the central
+    layout's entry for ``category``, and a category that is not part of the
+    layout yet is passed the octet :func:`next_free_octet` assigned it.
+    """
+    if octet is None:
+        octet = CATEGORY_OCTETS[category]
+    return (
+        f'{PREFIX_EXPR}.'
+        f'${{{octet_var(category)}:-{octet}}}.{int(machine_id)}'
+    )
 
 
 def empty_compose() -> dict:
@@ -18,36 +48,46 @@ def empty_compose() -> dict:
         'networks': {
             'net-main_network': {
                 'internal': True,
-                'ipam': {'config': [{'subnet': '192.168.0.0/16'}]},
+                'ipam': {'config': [{'subnet': SUBNET_EXPR}]},
             },
         },
     }
-
-# Addresses look like `ipv4_address: 192.168.3.5`: the third octet identifies
-# the category, the fourth the machine inside it.
-IPV4_RE = re.compile(r'192\.168\.(\d+)\.\d+')
 
 
 def next_free_octet(benchmark):
     """Third octet of the next category: one above the highest one in use.
 
-    What counts is the addresses of the existing compose files, not the
-    directories on disk: a stray or half-created directory would otherwise
-    shift the numbering onto an octet another category already uses.
+    What counts is the layout plus the addresses of the existing compose
+    files, not the directories on disk: a configured category whose file is
+    not written yet, or a stray half-created directory, would otherwise shift
+    the numbering onto an octet that is already taken. Kali's reserved octet
+    is ignored so it can never be handed to a category.
     """
-    in_use = set()
+    in_use = set(CATEGORY_OCTETS.values())
     for compose_file in glob(f'{benchmark}/machines/*/*/docker-compose.yml'):
         with open(compose_file, encoding='utf-8') as file:
-            in_use.update(
-                int(octet) for octet in IPV4_RE.findall(file.read())
-            )
-    return max(in_use, default=0) + 1
+            in_use.update(find_octets(file.read()))
+    in_use.discard(KALI_OCTET)
+    return max(in_use, default=FIRST_CATEGORY_OCTET - 1) + 1
 
 
-def create_service(category, task_type, machine_id, oct3, oct4):
-    service_name = f'{category}_{task_type}_vm{machine_id}'
+def category_octet(benchmark: str, category: str) -> int:
+    """Third octet to give ``category``.
+
+    An explicitly exported ``<CATEGORY>_OCTET`` wins, so a category added to
+    the benchmark outside :mod:`autopenbench.network` can still be placed
+    deliberately; otherwise the category takes the next free octet.
+    """
+    exported = os.environ.get(octet_var(category))
+    if exported:
+        return int(exported)
+    return next_free_octet(benchmark)
+
+
+def create_service(level, category, machine_id, oct3, oct4):
+    service_name = f'{level}_{category}_vm{machine_id}'
     service = {
-        'build': f'./{category}/{task_type}/vm{machine_id}',
+        'build': f'./{level}/{category}/vm{machine_id}',
         'command': 'bash -c "tail -f /dev/null"',
         'container_name': service_name,
         'image': service_name,
@@ -55,16 +95,18 @@ def create_service(category, task_type, machine_id, oct3, oct4):
         'restart': 'unless-stopped',
         'security_opt': ['label:disable'],
         'tty': True,
-        'volumes': [f'./{category}/{task_type}/vm{machine_id}/flag.txt:/root/flag.txt'],
-        'networks': {'net-main_network': {'ipv4_address': f'192.168.{oct3}.{oct4}'}}
+        'volumes': [f'./{level}/{category}/vm{machine_id}/flag.txt:/root/flag.txt'],
+        'networks': {'net-main_network': {
+            'ipv4_address': address_expr(category, oct4, oct3)
+        }}
     }
     return service_name, service
 
 
-def generate_docker_compose(benchmark, category, task_type, machine_id):
+def generate_docker_compose(benchmark, level, category, machine_id):
     machine_id = int(machine_id)
     compose_path = os.path.join(
-        benchmark, 'machines', category, task_type, 'docker-compose.yml')
+        benchmark, 'machines', level, category, 'docker-compose.yml')
     if os.path.exists(compose_path):
         # Creating a category that already has one would silently drop every
         # machine the existing file describes.
@@ -72,12 +114,12 @@ def generate_docker_compose(benchmark, category, task_type, machine_id):
             f'{compose_path} already exists; use "update" to add a machine '
             'to it.')
 
-    # Kali keeps 192.168.0.x; categories start at 1 and a new one gets the
-    # next free third octet.
-    oct_3 = next_free_octet(benchmark)
+    # Kali keeps its reserved octet; categories start at FIRST_CATEGORY_OCTET
+    # and a new one gets the next free third octet.
+    oct_3 = category_octet(benchmark, category)
 
     service_name, service = create_service(
-        category, task_type, machine_id, oct_3, machine_id)
+        level, category, machine_id, oct_3, machine_id)
 
     compose_data = empty_compose()
     compose_data['services'] = {service_name: service}
@@ -129,23 +171,23 @@ def _insert_service(compose_text: str, block: str) -> str:
     return '\n'.join(merged) + '\n'
 
 
-def update_docker_compose(benchmark, category, task_type, machine_id):
+def update_docker_compose(benchmark, level, category, machine_id):
     machine_id = int(machine_id)
     compose_path = os.path.join(
-        benchmark, 'machines', category, task_type, 'docker-compose.yml')
+        benchmark, 'machines', level, category, 'docker-compose.yml')
     with open(compose_path, encoding='utf-8') as file:
         raw = file.read()
     # The category's third octet comes from the addresses already in the
     # file -- any of them, not just whatever service happens to be first.
-    octets = IPV4_RE.findall(raw)
+    octets = find_octets(raw)
     if not octets:
         raise SystemExit(
-            f'{compose_path} has no 192.168.x.y addresses; cannot derive '
+            f'{compose_path} has no {PREFIX}.x.y addresses; cannot derive '
             'the category octet.')
     oct_3 = octets[0]
 
     service_name, service = create_service(
-        category, task_type, machine_id, oct_3, machine_id)
+        level, category, machine_id, oct_3, machine_id)
 
     with open(compose_path, 'w', encoding='utf-8') as file:
         file.write(_insert_service(
@@ -158,18 +200,18 @@ if __name__ == "__main__":
     parser.add_argument('function', type=str,
                         help='create or update')
     parser.add_argument('benchmark', type=str, help='The benchmark directory')
+    parser.add_argument('level', type=str,
+                        help='The level of the service (e.g. in-vitro)')
     parser.add_argument('category', type=str,
-                        help='The category of the service')
-    parser.add_argument('task_type', type=str,
-                        help='The task type of the service')
+                        help='The category of the service (e.g. web_security)')
     parser.add_argument('machine_id', type=str, help='The ID of the machine')
 
     args = parser.parse_args()
 
     if args.function == 'create':
-        generate_docker_compose(args.benchmark, args.category,
-                                args.task_type, args.machine_id)
+        generate_docker_compose(args.benchmark, args.level, args.category,
+                                args.machine_id)
 
     elif args.function == 'update':
-        update_docker_compose(args.benchmark, args.category,
-                              args.task_type, args.machine_id)
+        update_docker_compose(args.benchmark, args.level, args.category,
+                              args.machine_id)

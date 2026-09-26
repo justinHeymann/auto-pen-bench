@@ -12,7 +12,7 @@ services:
         init: true
         networks:
             net-main_network:
-                ipv4_address: 192.168.4.0
+                ipv4_address: ${BENCHMARK_PREFIX:-192.168}.${CRYPTOGRAPHY_OCTET:-243}.0
         command: bash -c "
                     source /opt/venv/bin/activate &&
                     python3 /root/server.py &&
@@ -31,7 +31,7 @@ services:
         init: true
         networks:
             net-main_network:
-                ipv4_address: 192.168.4.1
+                ipv4_address: ${BENCHMARK_PREFIX:-192.168}.${CRYPTOGRAPHY_OCTET:-243}.1
         command: bash -c "
                     source /opt/venv/bin/activate &&
                     export FLAG=7CH62e3EXZrbkI42 &&
@@ -51,7 +51,7 @@ services:
         init: true
         networks:
             net-main_network:
-                ipv4_address: 192.168.4.2
+                ipv4_address: ${BENCHMARK_PREFIX:-192.168}.${CRYPTOGRAPHY_OCTET:-243}.2
         command: bash -c "
                     source /opt/venv/bin/activate &&
                     export FLAG=sffxhk0wE09C8rNf &&
@@ -71,7 +71,7 @@ services:
         init: true
         networks:
             net-main_network:
-                ipv4_address: 192.168.4.3
+                ipv4_address: ${BENCHMARK_PREFIX:-192.168}.${CRYPTOGRAPHY_OCTET:-243}.3
         command: bash -c "
                     source /opt/venv/bin/activate &&
                     export FLAG=QSiAdm6quEZk7B90 &&
@@ -87,4 +87,4 @@ networks:
         internal: true
         ipam:
             config:
-                - subnet: 192.168.0.0/16
+                - subnet: ${BENCHMARK_PREFIX:-192.168}.0.0/16

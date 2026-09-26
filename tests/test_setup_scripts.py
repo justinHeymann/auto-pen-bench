@@ -6,7 +6,8 @@ import sys
 
 import pytest
 
-from support import load_module, repo_root
+from autopenbench.network import CATEGORY_OCTETS, PREFIX
+from support import load_module, repo_root, resolve_compose
 
 try:
     import yaml
@@ -39,14 +40,17 @@ def test_generate_compose_assigns_next_free_octet(tmp_path):
 
     mdc = _manage_docker_compose()
 
-    # Five categories in use: 192.168.1.x .. 192.168.5.x
-    for level, cat, octet in (
-        ("in-vitro", "access_control", 1),
-        ("in-vitro", "cryptography", 2),
-        ("in-vitro", "network_security", 3),
-        ("in-vitro", "web_security", 4),
-        ("real-world", "cve", 5),
+    # The five benchmark categories occupy the first five octets of the
+    # reserved range; a new category must land after them.
+    base = mdc.FIRST_CATEGORY_OCTET
+    for level, cat, offset in (
+        ("in-vitro", "access_control", 0),
+        ("in-vitro", "cryptography", 1),
+        ("in-vitro", "network_security", 2),
+        ("in-vitro", "web_security", 3),
+        ("real-world", "cve", 4),
     ):
+        octet = base + offset
         category_dir = tmp_path / "machines" / level / cat
         category_dir.mkdir(parents=True)
         (category_dir / "docker-compose.yml").write_text(
@@ -54,7 +58,7 @@ def test_generate_compose_assigns_next_free_octet(tmp_path):
             f"    {level}_{cat}_vm0:\n"
             "        networks:\n"
             "            net-main_network:\n"
-            f"                ipv4_address: 192.168.{octet}.0\n"
+            f"                ipv4_address: {mdc.address_expr(cat, 0, octet)}\n"
         )
     # A stray directory (or a half-created category) must not shift the
     # numbering onto an octet that is already taken.
@@ -70,7 +74,10 @@ def test_generate_compose_assigns_next_free_octet(tmp_path):
     data = yaml.safe_load(compose_path.read_text())
     ip = data["services"]["in-vitro_software_vm0"]["networks"]["net-main_network"]["ipv4_address"]
 
-    assert ip == "192.168.6.0"
+    assert resolve_compose(ip) == f"{PREFIX}.{base + 5}.0"
+    # The file carries the layout's expression, not a frozen literal, so the
+    # new category follows an override like the hand-written files do.
+    assert ip == mdc.address_expr("software", 0, base + 5)
 
 
 def test_generate_compose_refuses_to_overwrite_an_existing_category(tmp_path):
@@ -98,6 +105,7 @@ def test_update_compose_keeps_the_category_octet(tmp_path):
         pytest.skip("PyYAML not installed")
 
     mdc = _manage_docker_compose()
+    octet = CATEGORY_OCTETS["web_security"]
     category_dir = tmp_path / "machines" / "in-vitro" / "web_security"
     category_dir.mkdir(parents=True)
     (category_dir / "docker-compose.yml").write_text(
@@ -105,14 +113,47 @@ def test_update_compose_keeps_the_category_octet(tmp_path):
         "    in-vitro_web_security_vm0:\n"
         "        networks:\n"
         "            net-main_network:\n"
-        "                ipv4_address: 192.168.4.0\n"
+        f"                ipv4_address: {mdc.address_expr('web_security', 0, octet)}\n"
     )
 
     mdc.update_docker_compose(str(tmp_path), "in-vitro", "web_security", 3)
 
     data = yaml.safe_load((category_dir / "docker-compose.yml").read_text())
     service = data["services"]["in-vitro_web_security_vm3"]
-    assert service["networks"]["net-main_network"]["ipv4_address"] == "192.168.4.3"
+    assert resolve_compose(
+        service["networks"]["net-main_network"]["ipv4_address"]
+    ) == f"{PREFIX}.{octet}.3"
+
+
+def test_update_compose_reads_an_address_written_as_a_literal(tmp_path):
+    """A file from before the layout was configurable still yields its octet.
+
+    The octet of a new machine comes from the addresses the file already
+    holds, so a category created against an older revision must not silently
+    move to another /24 when a machine is added to it.
+    """
+    if yaml is None:
+        pytest.skip("PyYAML not installed")
+
+    mdc = _manage_docker_compose()
+    octet = CATEGORY_OCTETS["web_security"]
+    category_dir = tmp_path / "machines" / "in-vitro" / "web_security"
+    category_dir.mkdir(parents=True)
+    (category_dir / "docker-compose.yml").write_text(
+        "services:\n"
+        "    in-vitro_web_security_vm0:\n"
+        "        networks:\n"
+        "            net-main_network:\n"
+        f"                ipv4_address: {PREFIX}.{octet}.0\n"
+    )
+
+    mdc.update_docker_compose(str(tmp_path), "in-vitro", "web_security", 3)
+
+    data = yaml.safe_load((category_dir / "docker-compose.yml").read_text())
+    service = data["services"]["in-vitro_web_security_vm3"]
+    assert resolve_compose(
+        service["networks"]["net-main_network"]["ipv4_address"]
+    ) == f"{PREFIX}.{octet}.3"
 
 
 def test_update_compose_keeps_the_files_comments(tmp_path):
@@ -125,6 +166,7 @@ def test_update_compose_keeps_the_files_comments(tmp_path):
     if yaml is None:
         pytest.skip("PyYAML not installed")
     mdc = _manage_docker_compose()
+    octet = CATEGORY_OCTETS["web_security"]
     category_dir = tmp_path / "machines" / "in-vitro" / "web_security"
     category_dir.mkdir(parents=True)
     compose_path = category_dir / "docker-compose.yml"
@@ -134,7 +176,7 @@ def test_update_compose_keeps_the_files_comments(tmp_path):
         "    in-vitro_web_security_vm0:\n"
         "        networks:\n"
         "            net-main_network:\n"
-        "                ipv4_address: 192.168.4.0\n"
+        f"                ipv4_address: {mdc.address_expr('web_security', 0, octet)}\n"
         "\n"
         "# Network definition\n"
         "networks:\n"
@@ -152,8 +194,10 @@ def test_update_compose_keeps_the_files_comments(tmp_path):
     assert list(data["services"]) == [
         "in-vitro_web_security_vm0", "in-vitro_web_security_vm3"
     ]
-    assert data["services"]["in-vitro_web_security_vm3"]["networks"][
-        "net-main_network"]["ipv4_address"] == "192.168.4.3"
+    assert resolve_compose(
+        data["services"]["in-vitro_web_security_vm3"]["networks"][
+            "net-main_network"]["ipv4_address"]
+    ) == f"{PREFIX}.{octet}.3"
     assert data["networks"]["net-main_network"]["internal"] is True
 
 
