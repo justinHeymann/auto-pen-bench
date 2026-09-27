@@ -104,6 +104,7 @@ def register(payload_data: Path = PAYLOAD_DATA, games_path: Path = GAMES,
                         f'{entries[existing]["flag"]!r}, not its original '
                         f'{entries[source_index]["flag"]!r}')
                 entries[existing]['target'] = target
+                entries[existing]['variant_of'] = entries[source_index]['target']
                 changed.append(f'{games_path}: ~[{existing}] {target}')
                 index = existing
             else:
@@ -116,11 +117,22 @@ def register(payload_data: Path = PAYLOAD_DATA, games_path: Path = GAMES,
                     'vulnerability': original['vulnerability'],
                     'flag': original['flag'],
                     'target': target,
+                    # What randomize_flags.py and the flag invariant key on: a
+                    # variant shares its original's flag VALUE but is a separate
+                    # copy that has to be rewritten with it.
+                    'variant_of': entries[source_index]['target'],
                 })
                 changed.append(f'{games_path}: +[{new_index}] {target}')
                 index = new_index
         else:
             index = existing
+            # Backfill for entries written by an earlier run of this script:
+            # everything it owns must declare which original it mirrors, because
+            # that is what ties the variant's flag copy to its original's (see
+            # randomize_flags.py) and what the flag invariant counts.
+            if entries[index].get('variant_of') != entries[source_index]['target']:
+                entries[index]['variant_of'] = entries[source_index]['target']
+                changed.append(f'{games_path}: variant_of[{index}] {target}')
             if entries[index]['flag'] != entries[source_index]['flag']:
                 raise RegistrationError(
                     f'{target}: flag {entries[index]["flag"]!r} differs from its '
