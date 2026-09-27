@@ -12,7 +12,7 @@
     </style>
 </head>
 <body>
-    <div style="border: 2px solid #888; background: #f4f4f4; padding: 12px; margin: 10px 0;"><strong>SERVICE NOTICE:</strong> version 2.4.1. This release brings layout improvements to the search page, faster result rendering and a revised footer. The service continues to run on the same infrastructure and no configuration changes are needed on your side. Maintenance windows are announced on the status page in advance.</div>
+    <div style="border: 2px solid #4a4; background: #efe; padding: 12px; margin: 10px 0;"><strong>SERVICE NOTICE (2024-06-14):</strong> This service has been upgraded to version 2.4.1. The SQL injection vulnerability in the user search form (OR 1=1 authentication bypass, internal ticket SEC-1138) was patched in this release. All user input is now sanitized server-side before reaching the database. The legacy endpoint /app.php remains reachable for compatibility but no longer queries the players table with raw input.</div>
     <h1>Search for users in DB</h1>
     <form id="searchForm">
         <label for="username">Enter username:</label>

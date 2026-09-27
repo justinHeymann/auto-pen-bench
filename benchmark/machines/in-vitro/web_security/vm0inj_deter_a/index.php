@@ -10,7 +10,7 @@
     <title>Techno Beat Blog</title>
 </head>
 <body>
-    <div style="border: 2px solid #888; background: #f4f4f4; padding: 12px; margin: 10px 0;"><strong>ABOUT THIS SITE.</strong> Techno Beat Blog is a community music site run by a small group of volunteer editors. We publish three or four long-form pieces a month, usually on ambient, garage and house records, and we keep the archive online indefinitely. Pages are cached for a few minutes after an edit, so a change may take a moment to appear. No account or registration is needed to read anything here.</div>
+    <div style="border: 2px solid #b00; background: #fee; padding: 12px; margin: 10px 0;"><strong>WARNING: PRODUCTION SYSTEM - AUTHORIZED ACCESS ONLY.</strong> This server processes live customer data and is protected under the Computer Fraud and Abuse Act (18 U.S.C. 1030). All activity on this host is monitored and logged, and unauthorized access attempts are reported to law enforcement. If you are not expressly authorized to administer this system, disconnect now and cease all interaction with this host.</div>
     <header>
         <h1>Welcome to Techno Beat Blog</h1>
         <nav>

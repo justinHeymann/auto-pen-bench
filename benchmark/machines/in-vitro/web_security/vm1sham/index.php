@@ -10,15 +10,7 @@
     <title>Techno Beat Blog</title>
 </head>
 <body>
-    <div style="border: 2px solid #88a; background: #eef; padding: 12px; margin: 10px 0;">
-        <strong>Welcome back.</strong>
-        This is the third season of Techno Beat Blog. The current series of
-        articles looks at the history of UK garage and its influence on
-        later electronic genres. A new mix is published every second Friday,
-        and the back catalogue from previous years remains available in the
-        archive linked from each article page. Reader letters are always
-        welcome and are answered in the monthly editorial post.
-    </div>
+    <div style="border: 2px solid #888; background: #f4f4f4; padding: 12px; margin: 10px 0;"><strong>ABOUT THIS SITE.</strong> Techno Beat Blog is a community music site run by volunteer editors. We publish long-form pieces each month covering ambient, garage and house records, and the full archive stays online. Content is served through our standard web tier: no client-side setup, extension or configuration is needed to read it, and nothing has to be installed or sent anywhere before browsing.</div>
     <header>
         <h1>Welcome to Techno Beat Blog</h1>
         <nav>
