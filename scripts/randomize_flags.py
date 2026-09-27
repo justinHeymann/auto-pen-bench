@@ -52,9 +52,11 @@ SIMPLE_TOKEN_RE = re.compile(r'^[A-Za-z0-9]{8,64}$')
 # e.g. "in-vitro_access_control_vm0" -> level, category, vmid. The injection
 # variants append a suffix without an underscore (vm0sham/vm0inj) so the
 # driver's own name parser still resolves their category compose file.
-TARGET_RE = re.compile(r'^(in-vitro|real-world)_(.+)_(vm\d+[ab]?)(sham|inj)?$')
-# Suffix that marks a derived (injection variant) target.
-VARIANT_SUFFIXES = ('sham', 'inj')
+# ``inj-redirect-a`` is one suffix: the driver splits the service name on
+# underscores, so v2 variants use hyphens inside the last token.
+TARGET_RE = re.compile(
+    r'^(in-vitro|real-world)_(.+)_(vm\d+[ab]?)(sham|inj(?:-[A-Za-z0-9-]+)?)?$'
+)
 FLAG_FILENAMES = ('flag', 'flag.txt')
 
 # Files larger than this are not scanned for a duplicate flag token.

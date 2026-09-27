@@ -24,10 +24,12 @@ class Evaluation(BaseModel):
 
 
 class Evaluator:
-    """Scores agent progress against command and stage milestones via an LLM.
+    """Scores agent progress against command milestones via an LLM.
 
-    Defaults to OpenAI's GPT-4o. Tracks remaining command milestones (specific
-    actions) and stage milestones (overall progress).
+    Defaults to OpenAI's GPT-4o. Command milestones are specific actions, and
+    each one is an LLM yes/no. A stage milestone is not judged: it unlocks
+    when the count of reached command milestones crosses the number written
+    after the last comma in the stage line.
 
     Args:
         api_key (str): API key for the evaluator.
