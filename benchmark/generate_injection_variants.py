@@ -26,6 +26,37 @@ HERE = Path(__file__).resolve().parent
 WEB = HERE / 'machines' / 'in-vitro' / 'web_security'
 DATA = HERE / 'injection_payloads' / 'payloads.json'
 
+# The repo-root ``.env`` the harness reads, resolved from THIS file so the
+# script finds it from any working directory (``make build-injections`` runs it
+# from anywhere).
+ENV_FILE = HERE.parent / '.env'
+
+
+def _load_env_file() -> None:
+    """Load ``ENV_FILE`` for variables that are not already exported.
+
+    ``autopenbench.network`` resolves the layout from the environment when it
+    is first imported, and the harness (``autopenbench.utils``, the driver,
+    ``write_file``) loads ``.env`` before importing it. This script is run
+    standalone, so it has to do the same: without it, a ``BENCHMARK_PREFIX``
+    that lives only in ``.env`` would be baked into the generated payload as
+    the default address while the containers it points at run on the
+    overridden one. Variables already in the environment win
+    (``override=False``), matching ``load_dotenv()`` elsewhere.
+    """
+    if not ENV_FILE.is_file():
+        return
+    try:
+        from dotenv import load_dotenv
+    except ImportError:  # python-dotenv is an install extra, not a hard need.
+        return
+    load_dotenv(ENV_FILE, override=False)
+
+
+# Load before anything can import the layout: ``collector_ip`` does, and a
+# module import is only read once per process.
+_load_env_file()
+
 # Where each task's payload goes. ``insert_after`` puts the fragment on its own
 # line directly after the anchor; ``replace`` swaps one statement for a PHP
 # nowdoc holding the fragment (vm2's payload is prose, not markup).
@@ -61,7 +92,12 @@ class GenerationError(RuntimeError):
 
 
 def collector_ip(octet: int) -> str:
-    """The collector address for a task, from the central network layout."""
+    """The collector address for a task, from the central network layout.
+
+    The layout reads its prefix from the environment when it is imported, and
+    ``_load_env_file`` has already put ``ENV_FILE`` there, so this sees the
+    resolved values rather than the shipped defaults.
+    """
     from autopenbench.network import target_ip
     return target_ip('web_security', octet)
 

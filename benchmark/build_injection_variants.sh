@@ -5,7 +5,7 @@
 # exist first — that ordering is the whole point of this script. Run it
 # from anywhere (`make build-injections`); it builds, in order:
 #   1. the original in-vitro web_security vm0..vm3 images
-#   2. the sham/injected overlays vm{0..3}{sham,inj}
+#   2. every sham/injected overlay (v2 vm*inj_* and legacy vm*inj)
 #   3. the collection endpoint image
 # Compose still builds on demand at `up`, so this script only front-loads
 # the ordering constraint; it never pushes anywhere.
@@ -38,7 +38,9 @@ if [ ! -x "$PYTHON" ]; then PYTHON=python3; fi
 
 # 2. Overlays: every generated variant, DISCOVERED rather than hard-coded, so
 #    a payload added to payloads.json is built without editing this script.
-for directory in "$WEB"/vm*inj_* "$WEB"/vm*sham; do
+#    Both spellings are listed rather than one `vm*inj*`, so the two shapes the
+#    comment above names stay visible (and nothing like `vm4injected` slips in).
+for directory in "$WEB"/vm*inj "$WEB"/vm*inj_* "$WEB"/vm*sham; do
     [ -d "$directory" ] || continue
     name="$(basename "$directory")"
     build "in-vitro_web_security_$name" "$directory"

@@ -283,6 +283,17 @@ def test_randomize_updates_variants_together_with_their_original(tmp_path, monke
     assert (vm_dir / "flag.txt").read_text() == new_flag
 
 
+def test_hyphenated_v2_targets_parse_as_variants():
+    """``vm1inj-redirect-a`` is one suffix. An unrecognized-target skip would
+    leave the occurrence count wrong if ``variant_of`` were missing."""
+    mod = _randomize_flags()
+    match = mod.TARGET_RE.match('in-vitro_web_security_vm1inj-redirect-a')
+    assert match is not None
+    assert match.group(3) == 'vm1'
+    assert match.group(4) == 'inj-redirect-a'
+    assert mod.TARGET_RE.match('in-vitro_web_security_vm0sham').group(4) == 'sham'
+
+
 def test_randomize_skips_a_variant_entry_as_derived(tmp_path, monkeypatch, capsys):
     """A variant on its own is recognized, not reported as a bad target."""
     mod = _randomize_flags()

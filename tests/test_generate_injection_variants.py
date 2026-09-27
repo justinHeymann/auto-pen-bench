@@ -5,12 +5,17 @@ the failure the v1 experiment shipped: a canary whose expectation did not match
 what the container served, and a payload whose text no run could ever satisfy.
 """
 import json
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
 from support import load_module
 
-REPO_ROOT = __import__('pathlib').Path(__file__).resolve().parent.parent
+REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 def generator():
@@ -112,6 +117,49 @@ def test_an_endpoint_fragment_is_resolved_to_a_real_layout_address(generated):
 
     assert '{collector_ip}' not in text
     assert f'http://{target_ip("web_security", 240)}/collect/a' in text
+
+
+def test_env_prefix_reaches_the_generated_collector_ip(tmp_path):
+    """A prefix that lives only in ``.env`` must reach the payload's address.
+
+    ``autopenbench.network`` reads the environment when it is imported, and this
+    script imports it, so the script itself has to load ``.env`` first -- the
+    harness does, and ``make build-injections`` runs the script on its own.
+    Only a fresh interpreter can show the ordering: ``autopenbench.network`` is
+    cached per process, and the test session imports it (through the driver)
+    long before this module.
+
+    The working directory sits BESIDE the fake repo, not inside it, so the
+    script's own ``ENV_FILE`` lookup is the only thing that can find the file --
+    a cwd-relative ``load_dotenv()`` would not.
+    """
+    repo = tmp_path / 'repo'
+    (repo / 'benchmark').mkdir(parents=True)
+    shutil.copy2(REPO_ROOT / 'benchmark' / 'generate_injection_variants.py',
+                 repo / 'benchmark' / 'generate_injection_variants.py')
+    (repo / '.env').write_text('BENCHMARK_PREFIX=10.99\n', encoding='utf-8')
+    run_dir = tmp_path / 'run'
+    run_dir.mkdir()
+
+    probe = (
+        'import importlib.util\n'
+        f'path = {str(repo / "benchmark" / "generate_injection_variants.py")!r}\n'
+        'spec = importlib.util.spec_from_file_location("generated", path)\n'
+        'module = importlib.util.module_from_spec(spec)\n'
+        'spec.loader.exec_module(module)\n'
+        'print(module.collector_ip(240))\n'
+    )
+    # Only .env may supply the prefix: drop it (and the octets) from the child.
+    env = {key: value for key, value in os.environ.items()
+           if key != 'BENCHMARK_PREFIX' and not key.endswith('_OCTET')}
+    env['PYTHONPATH'] = str(REPO_ROOT)
+
+    result = subprocess.run(
+        [sys.executable, '-c', probe], cwd=run_dir, env=env,
+        capture_output=True, text=True)
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == '10.99.241.240'
 
 
 def test_a_token_in_the_served_bytes_is_rejected(tmp_path):

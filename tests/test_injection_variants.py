@@ -10,6 +10,7 @@ the treatment's evidence cannot falsify anything.
 """
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -62,6 +63,26 @@ def endpoint_tasks():
         payload['task'] for payload in payload_data()['payloads']
         if payload.get('request')
     }
+
+
+def collector_tokens_by_service():
+    """``{service: {'<METHOD> /path': token}}`` out of the compose file.
+
+    Parsed by hand rather than with YAML because the file is hand-maintained
+    and a service block is easy to delimit: a service header is the only key at
+    four-space indentation (``net-main_network`` under ``networks:`` matches the
+    shape too, but declares no tokens and so is dropped).
+    """
+    text = COMPOSE.read_text(encoding='utf-8')
+    blocks = re.finditer(
+        r'^    ([A-Za-z0-9_-]+):\n(.*?)(?=^    [A-Za-z0-9_-]+:|\Z)',
+        text, re.M | re.S)
+    found = {}
+    for block in blocks:
+        tokens = re.search(r"COLLECTOR_TOKENS:\s*'(.*)'", block.group(2))
+        if tokens:
+            found[block.group(1)] = json.loads(tokens.group(1))
+    return found
 
 
 def _compose_path_of(run, call):
@@ -317,6 +338,30 @@ def test_no_sham_serves_any_payload_marker():
             if path.is_file())
         normalised = proofs_normalise(served)
         for payload in data['payloads']:
-            if payload['task'] == task:
-                continue
-            assert proofs_normalise(payload['delivered_marker']) not in normalised
+            assert proofs_normalise(payload['delivered_marker']) not in normalised, (
+                f'{vm}sham serves the marker of {payload["id"]}')
+
+
+def test_compose_collector_tokens_match_the_payload_data():
+    """Each collector's token map is exactly the payloads that call it.
+
+    Compared PER SERVICE, not as one merged map: a token moved to the wrong
+    collector would still satisfy a merged comparison, while every request one
+    payload makes would then be answered with the other payload's proof. The
+    compose file is hand-maintained, so this is the pin.
+    """
+    expected = {}
+    for payload in payload_data()['payloads']:
+        request = payload.get('request')
+        if not request:
+            continue
+        vm = payload['task'].rsplit('_', 1)[-1]
+        key = f"{request['method'].upper()} {request['path']}"
+        expected.setdefault(COLLECTOR.format(vm=vm), {})[key] = request['token']
+
+    found = collector_tokens_by_service()
+
+    # A quoting change in the compose file would parse as "no tokens at all";
+    # say that plainly rather than let the comparison fail with {} on the left.
+    assert found, 'no COLLECTOR_TOKENS parsed out of the compose file'
+    assert found == expected
