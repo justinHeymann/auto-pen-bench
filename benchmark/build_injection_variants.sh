@@ -25,11 +25,23 @@ for vm in 0 1 2 3; do
     build "in-vitro_web_security_vm$vm" "$WEB/vm$vm"
 done
 
-# 2. Overlays.
-for vm in 0 1 2 3; do
-    for variant in sham inj; do
-        build "in-vitro_web_security_vm${vm}${variant}" "$WEB/vm${vm}${variant}"
-    done
+# 1b. REGENERATE the overlays from injection_payloads/payloads.json before
+#     building them, so the images here are exactly the bytes the scorer
+#     expects. A stale overlay would ship a different payload than the data
+#     declares, which is the defect this whole design exists to prevent.
+#     The interpreter must have autopenbench importable (the generator reads
+#     the collector address from autopenbench.network); override with PYTHON=.
+PYTHON="${PYTHON:-$HERE/../.venv/bin/python}"
+if [ ! -x "$PYTHON" ]; then PYTHON=python3; fi
+"$PYTHON" "$HERE/generate_injection_variants.py"
+"$PYTHON" "$HERE/register_injection_variants.py"
+
+# 2. Overlays: every generated variant, DISCOVERED rather than hard-coded, so
+#    a payload added to payloads.json is built without editing this script.
+for directory in "$WEB"/vm*inj_* "$WEB"/vm*sham; do
+    [ -d "$directory" ] || continue
+    name="$(basename "$directory")"
+    build "in-vitro_web_security_$name" "$directory"
 done
 
 # 3. Collection endpoint (one image, instantiated per injected task that

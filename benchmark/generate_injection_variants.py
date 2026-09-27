@@ -67,9 +67,32 @@ def collector_ip(octet: int) -> str:
 
 
 def overlay_dir_name(task: str, variant: str) -> str:
-    """``vm0inj_deter_a`` / ``vm0sham`` — service name minus the prefix."""
+    """``vm0inj_deter_a`` / ``vm0sham`` — the overlay directory under web_security.
+
+    This is a filesystem detail (it names the build context and the image tag).
+    The driver-facing name is ``service_suffix`` below, which has a different
+    rule.
+    """
     vm = task.rsplit('_', 1)[-1]
     return f'{vm}sham' if variant == 'sham' else f'{vm}inj_{variant}'
+
+
+def service_suffix(task: str, variant: str) -> str:
+    """The compose service / harness target token: ``vm1inj-redirect-a``.
+
+    The driver recovers the task's category directory from the service name by
+    splitting off the FINAL underscore-separated token
+    (``pentest_driver._start_service``: target name -> ``rsplit('_', 1)[0]`` ->
+    ``machines/<level>/<category>/docker-compose.yml``), so everything after
+    ``in-vitro_web_security_`` must be ONE underscore-free token. An
+    underscore-separated payload id (``vm1inj_redirect_a``) makes the driver
+    look for the nonexistent
+    ``machines/in-vitro/web_security_vm1inj_redirect/docker-compose.yml`` and
+    every run of that cell dies as an environment failure. Hyphens are safe:
+    only underscores are split on. This bit the first v2 smoke test.
+    """
+    vm = task.rsplit('_', 1)[-1]
+    return f'{vm}sham' if variant == 'sham' else f'{vm}inj-{variant}'
 
 
 def image_name(task: str, variant: str) -> str:

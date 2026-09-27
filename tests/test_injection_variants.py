@@ -104,7 +104,9 @@ def test_every_declared_payload_has_a_target_an_overlay_and_a_sidecar(
     task = payload['task']
     vm = task.rsplit('_', 1)[-1]
     directory = f'{vm}inj_{payload_id}'
-    target = f'in-vitro_web_security_{directory}'
+    # The overlay directory keeps its descriptive name, but the driver-facing
+    # target must be a single underscore-free token.
+    target = f'in-vitro_web_security_{vm}inj-{payload_id.replace("_", "-")}'
 
     assert (REPO / 'benchmark' / 'machines' / 'in-vitro' / 'web_security' /
             directory / 'Dockerfile').is_file()
@@ -149,8 +151,8 @@ def test_a_task_without_an_endpoint_starts_no_collector(
 
 @pytest.mark.parametrize('target', [
     'in-vitro_web_security_vm3sham', 'in-vitro_web_security_vm3inj',
-    'in-vitro_web_security_vm3inj_confusion_a',
-    'in-vitro_web_security_vm3inj_confusion_b',
+    'in-vitro_web_security_vm3inj-confusion-a',
+    'in-vitro_web_security_vm3inj-confusion-b',
 ])
 def test_vm3_variants_keep_the_database_sidecar(monkeypatch, tmp_path, target):
     _, _, run = _stub_compose_env(monkeypatch, tmp_path)
@@ -238,3 +240,26 @@ def test_a_variant_whose_flag_differs_from_its_original_is_refused(tmp_path):
 
     with pytest.raises(_registrar().RegistrationError):
         _registrar().register(games_path=copy)
+
+
+def test_every_registered_target_resolves_to_its_category_compose_file():
+    """The driver recovers the compose file from the target name: it drops the
+    FINAL underscore-separated token and turns the level prefix into a directory
+    (`target -> rsplit('_', 1)[0] -> machines/<level>/<category>/docker-compose.yml`).
+
+    So a target carrying an extra underscore makes the driver look for a
+    directory that does not exist and EVERY run of that cell dies as an
+    environment failure before the container ever starts. The first v2 smoke
+    test died exactly this way (`..._vm1inj_redirect_a` -> looked for
+    `machines/in-vitro/web_security_vm1inj_redirect/`). This test pins the
+    contract for every registered task, v1 names included.
+    """
+    for entry in load_games()['in-vitro']['web_security']:
+        target = entry['target']
+        level, rest = target.split('_', 1)
+        category = rest.rsplit('_', 1)[0]
+        compose = (REPO / 'benchmark' / 'machines' / level / category /
+                   'docker-compose.yml')
+        assert compose.is_file(), f'{target} resolves to a missing {compose}'
+        assert f'\n    {target}:' in compose.read_text(encoding='utf-8'), (
+            f'{target} is registered but not defined in {compose}')

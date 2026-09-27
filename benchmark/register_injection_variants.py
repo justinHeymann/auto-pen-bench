@@ -44,8 +44,15 @@ class RegistrationError(RuntimeError):
 
 
 def target_of(payload: dict) -> str:
+    """The harness target / compose service name for a payload cell.
+
+    Hyphens, not underscores, inside the variant suffix: the driver recovers
+    the category directory by dropping the target's final underscore-separated
+    token, so the suffix has to be a single token (see
+    ``generate_injection_variants.service_suffix``).
+    """
     vm = payload['task'].rsplit('_', 1)[-1]
-    return f'in-vitro_web_security_{vm}inj_{payload["id"]}'
+    return f'in-vitro_web_security_{vm}inj-{payload["id"].replace("_", "-")}'
 
 
 def original_index(payload: dict) -> int:
@@ -72,21 +79,46 @@ def register(payload_data: Path = PAYLOAD_DATA, games_path: Path = GAMES,
     for payload in data['payloads']:
         target = target_of(payload)
         source_index = original_index(payload)
+        vm = payload['task'].rsplit('_', 1)[-1]
         existing = next(
             (i for i, entry in enumerate(entries) if entry['target'] == target),
             None)
         if existing is None:
-            # Append-only: the new index must not disturb any existing vm_id.
-            original = entries[source_index]
-            new_index = len(entries)
-            entries.append({
-                'task': original['task'],
-                'vulnerability': original['vulnerability'],
-                'flag': original['flag'],
-                'target': target,
-            })
-            changed.append(f'{games_path}: +[{new_index}] {target}')
-            index = new_index
+            # A name from an earlier naming scheme is corrected IN PLACE, never
+            # re-appended: these entries sit at the indices recorded runs use as
+            # vm_id, so appending would leave two entries for one task and
+            # silently renumber nothing but the meaning. (v2 first shipped
+            # `..._vm1inj_redirect_a`; the driver needs a single underscore-free
+            # suffix token.)
+            stale = f'in-vitro_web_security_{vm}inj_'
+            existing = next(
+                (i for i, entry in enumerate(entries)
+                 if entry['target'].startswith(stale)), None)
+            if existing is not None:
+                # Same guard as the in-place path below: the variant mounts its
+                # original's flag file, so a mismatched flag means the entry was
+                # not written by this script and must not be silently adopted.
+                if entries[existing]['flag'] != entries[source_index]['flag']:
+                    raise RegistrationError(
+                        f'{target}: the entry it replaces carries flag '
+                        f'{entries[existing]["flag"]!r}, not its original '
+                        f'{entries[source_index]["flag"]!r}')
+                entries[existing]['target'] = target
+                changed.append(f'{games_path}: ~[{existing}] {target}')
+                index = existing
+            else:
+                # Append-only: the new index must not disturb any existing
+                # vm_id.
+                original = entries[source_index]
+                new_index = len(entries)
+                entries.append({
+                    'task': original['task'],
+                    'vulnerability': original['vulnerability'],
+                    'flag': original['flag'],
+                    'target': target,
+                })
+                changed.append(f'{games_path}: +[{new_index}] {target}')
+                index = new_index
         else:
             index = existing
             if entries[index]['flag'] != entries[source_index]['flag']:

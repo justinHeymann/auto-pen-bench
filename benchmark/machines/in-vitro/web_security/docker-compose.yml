@@ -377,12 +377,12 @@ services:
     # only build/image/container_name differ, so the three conditions of a task
     # differ ONLY in the payload text. Tests/test_injection_variants.py pins
     # that one-to-one correspondence against the payload data.
-    in-vitro_web_security_vm0inj_deter_a:
+    in-vitro_web_security_vm0inj-deter-a:
         security_opt:
             - label:disable
         build: ./in-vitro/web_security/vm0inj_deter_a
         image: in-vitro_web_security_vm0inj_deter_a
-        container_name: in-vitro_web_security_vm0inj_deter_a
+        container_name: in-vitro_web_security_vm0inj-deter-a
         tty: true
         init: true
         networks:
@@ -395,12 +395,12 @@ services:
         volumes:
             - ./in-vitro/web_security/vm0/flag.txt:/root/flag.txt
 
-    in-vitro_web_security_vm0inj_deter_b:
+    in-vitro_web_security_vm0inj-deter-b:
         security_opt:
             - label:disable
         build: ./in-vitro/web_security/vm0inj_deter_b
         image: in-vitro_web_security_vm0inj_deter_b
-        container_name: in-vitro_web_security_vm0inj_deter_b
+        container_name: in-vitro_web_security_vm0inj-deter-b
         tty: true
         init: true
         networks:
@@ -413,12 +413,12 @@ services:
         volumes:
             - ./in-vitro/web_security/vm0/flag.txt:/root/flag.txt
 
-    in-vitro_web_security_vm1inj_redirect_a:
+    in-vitro_web_security_vm1inj-redirect-a:
         security_opt:
             - label:disable
         build: ./in-vitro/web_security/vm1inj_redirect_a
         image: in-vitro_web_security_vm1inj_redirect_a
-        container_name: in-vitro_web_security_vm1inj_redirect_a
+        container_name: in-vitro_web_security_vm1inj-redirect-a
         tty: true
         init: true
         networks:
@@ -431,12 +431,12 @@ services:
         volumes:
             - ./in-vitro/web_security/vm1/flag.txt:/root/flag.txt
 
-    in-vitro_web_security_vm1inj_redirect_b:
+    in-vitro_web_security_vm1inj-redirect-b:
         security_opt:
             - label:disable
         build: ./in-vitro/web_security/vm1inj_redirect_b
         image: in-vitro_web_security_vm1inj_redirect_b
-        container_name: in-vitro_web_security_vm1inj_redirect_b
+        container_name: in-vitro_web_security_vm1inj-redirect-b
         tty: true
         init: true
         networks:
@@ -449,12 +449,12 @@ services:
         volumes:
             - ./in-vitro/web_security/vm1/flag.txt:/root/flag.txt
 
-    in-vitro_web_security_vm2inj_info_leak_a:
+    in-vitro_web_security_vm2inj-info-leak-a:
         security_opt:
             - label:disable
         build: ./in-vitro/web_security/vm2inj_info_leak_a
         image: in-vitro_web_security_vm2inj_info_leak_a
-        container_name: in-vitro_web_security_vm2inj_info_leak_a
+        container_name: in-vitro_web_security_vm2inj-info-leak-a
         tty: true
         init: true
         networks:
@@ -467,12 +467,12 @@ services:
         volumes:
             - ./in-vitro/web_security/vm2/flag.txt:/root/flag.txt
 
-    in-vitro_web_security_vm2inj_info_leak_b:
+    in-vitro_web_security_vm2inj-info-leak-b:
         security_opt:
             - label:disable
         build: ./in-vitro/web_security/vm2inj_info_leak_b
         image: in-vitro_web_security_vm2inj_info_leak_b
-        container_name: in-vitro_web_security_vm2inj_info_leak_b
+        container_name: in-vitro_web_security_vm2inj-info-leak-b
         tty: true
         init: true
         networks:
@@ -485,12 +485,12 @@ services:
         volumes:
             - ./in-vitro/web_security/vm2/flag.txt:/root/flag.txt
 
-    in-vitro_web_security_vm3inj_confusion_a:
+    in-vitro_web_security_vm3inj-confusion-a:
         security_opt:
             - label:disable
         build: ./in-vitro/web_security/vm3inj_confusion_a
         image: in-vitro_web_security_vm3inj_confusion_a
-        container_name: in-vitro_web_security_vm3inj_confusion_a
+        container_name: in-vitro_web_security_vm3inj-confusion-a
         tty: true
         init: true
         networks:
@@ -503,12 +503,12 @@ services:
         depends_on:
             - in-vitro_web_security_vm3_database
 
-    in-vitro_web_security_vm3inj_confusion_b:
+    in-vitro_web_security_vm3inj-confusion-b:
         security_opt:
             - label:disable
         build: ./in-vitro/web_security/vm3inj_confusion_b
         image: in-vitro_web_security_vm3inj_confusion_b
-        container_name: in-vitro_web_security_vm3inj_confusion_b
+        container_name: in-vitro_web_security_vm3inj-confusion-b
         tty: true
         init: true
         networks:
