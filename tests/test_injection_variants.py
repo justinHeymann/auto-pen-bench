@@ -34,6 +34,16 @@ def payload_data():
     return json.loads(PAYLOAD_DATA.read_text(encoding='utf-8'))
 
 
+def proofs_normalise(text: str) -> str:
+    """Whitespace-insensitive comparison.
+
+    Deliberately mirrors what the scorer does: the v1 defect was a phrase the
+    scorer matched literally being broken across lines by HTML/terminal
+    wrapping, so a marker check that ignores whitespace is the honest one.
+    """
+    return ' '.join(text.split())
+
+
 def expected_sidecars(task: str, endpoint_task: bool) -> list:
     vm = task.rsplit('_', 1)[-1]
     sidecars = [COLLECTOR.format(vm=vm)] if endpoint_task else []
@@ -263,3 +273,50 @@ def test_every_registered_target_resolves_to_its_category_compose_file():
         assert compose.is_file(), f'{target} resolves to a missing {compose}'
         assert f'\n    {target}:' in compose.read_text(encoding='utf-8'), (
             f'{target} is registered but not defined in {compose}')
+
+
+def test_every_generated_overlay_serves_its_payload_marker():
+    """Cross-repo drift control: the payload data declares a LITERAL delivered
+    marker, and that exact phrase must appear in the bytes the variant's
+    container serves. The generator's own validation is not enough on its own -
+    it checks the FRAGMENT, while the scorer reads the SERVED page - so this
+    test goes from the declared data all the way to the generated file, which is
+    the step where a wrong anchor or a dropped insertion would hide.
+
+    A sham only gets the negative half of the check: it must serve none of the
+    payloads' markers, or its role as a mechanical control is void.
+    """
+    data = payload_data()
+    markers = {}
+    for payload in data['payloads']:
+        vm = payload['task'].rsplit('_', 1)[-1]
+        served = ' '.join(
+            path.read_text(encoding='utf-8')
+            for path in (REPO / 'benchmark' / 'machines' / 'in-vitro' /
+                         'web_security' / f'{vm}inj_{payload["id"]}').glob('*')
+            if path.is_file())
+        marker = payload['delivered_marker']
+        markers[payload['id']] = marker
+        assert proofs_normalise(marker) in proofs_normalise(served), (
+            f'{payload["id"]} declares the marker {marker!r} but the generated '
+            f'overlay for {payload["task"]} does not serve it')
+        # The collector token must never be served: a token in the page would
+        # turn the proof into a free false positive.
+        if payload.get('request'):
+            assert payload['request']['token'] not in served
+
+
+def test_no_sham_serves_any_payload_marker():
+    data = payload_data()
+    for task in data['shams']:
+        vm = task.rsplit('_', 1)[-1]
+        served = ' '.join(
+            path.read_text(encoding='utf-8')
+            for path in (REPO / 'benchmark' / 'machines' / 'in-vitro' /
+                         'web_security' / f'{vm}sham').glob('*')
+            if path.is_file())
+        normalised = proofs_normalise(served)
+        for payload in data['payloads']:
+            if payload['task'] == task:
+                continue
+            assert proofs_normalise(payload['delivered_marker']) not in normalised
