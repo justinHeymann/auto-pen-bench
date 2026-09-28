@@ -14,11 +14,11 @@ import re
 from pathlib import Path
 
 import pytest
-from support import load_module
-from test_compose_orchestration import _stub_compose_env
 
 from autopenbench.driver import pentest_driver
 from autopenbench.utils import load_games
+from support import load_module
+from test_compose_orchestration import _stub_compose_env
 
 REPO = Path(__file__).resolve().parent.parent
 PAYLOAD_DATA = REPO / 'benchmark' / 'injection_payloads' / 'payloads.json'
@@ -271,6 +271,138 @@ def test_a_variant_whose_flag_differs_from_its_original_is_refused(tmp_path):
 
     with pytest.raises(_registrar().RegistrationError):
         _registrar().register(games_path=copy)
+
+
+def _tiny_registration(tmp_path, *, existing_target=None, existing_flag=None):
+    """A games table whose vm1 original is the only real task."""
+    milestones = tmp_path / 'milestones'
+    for kind in ('command_milestones', 'stage_milestones'):
+        directory = milestones / kind / 'in-vitro' / 'web_security'
+        directory.mkdir(parents=True)
+        (directory / 'vm1.txt').write_text(f'{kind} source\n', encoding='utf-8')
+    original = {
+        'task': 'find the flag',
+        'vulnerability': 'xss',
+        'flag': 'flag{original}',
+        'target': 'in-vitro_web_security_vm1',
+    }
+    entries = [
+        {'task': 'unused', 'vulnerability': 'x', 'flag': 'flag{other}',
+         'target': 'in-vitro_web_security_vm0'},
+        original,
+    ]
+    if existing_target is not None:
+        entries.append({
+            'task': original['task'],
+            'vulnerability': original['vulnerability'],
+            'flag': original['flag'] if existing_flag is None else existing_flag,
+            'target': existing_target,
+        })
+    games_path = tmp_path / 'games.json'
+    games_path.write_text(json.dumps(
+        {'in-vitro': {'web_security': entries}}), encoding='utf-8')
+    payloads = tmp_path / 'payloads.json'
+    payloads.write_text(json.dumps({
+        'payloads': [{'id': 'redirect_a', 'task': 'web_security_vm1'}],
+    }), encoding='utf-8')
+    return payloads, games_path, milestones
+
+
+def test_a_new_payload_is_appended_and_its_milestones_are_copied(tmp_path):
+    """vm_id is the array index, so a new variant is appended and its milestone
+    files are copied from the original. A second run is a no-op."""
+    payloads, games_path, milestones = _tiny_registration(tmp_path)
+
+    changed = _registrar().register(payloads, games_path, milestones)
+
+    web = json.loads(games_path.read_text(encoding='utf-8'))[
+        'in-vitro']['web_security']
+    assert len(web) == 3
+    assert web[2]['target'] == 'in-vitro_web_security_vm1inj-redirect-a'
+    assert web[2]['variant_of'] == 'in-vitro_web_security_vm1'
+    assert web[2]['flag'] == web[1]['flag']
+    assert web[2]['task'] == web[1]['task']
+    for kind in ('command_milestones', 'stage_milestones'):
+        copied = (milestones / kind / 'in-vitro' / 'web_security' / 'vm2.txt')
+        assert copied.read_text(encoding='utf-8') == f'{kind} source\n'
+        assert str(copied) in changed
+    assert _registrar().register(payloads, games_path, milestones) == []
+
+
+def test_an_underscore_variant_name_is_renamed_in_place(tmp_path):
+    """The first v2 names used an extra underscore. Appending the corrected
+    name would leave two entries for one task, so the stale name is rewritten
+    where it sits."""
+    payloads, games_path, milestones = _tiny_registration(
+        tmp_path, existing_target='in-vitro_web_security_vm1inj_redirect_a')
+
+    _registrar().register(payloads, games_path, milestones)
+
+    web = json.loads(games_path.read_text(encoding='utf-8'))[
+        'in-vitro']['web_security']
+    assert len(web) == 3
+    assert web[2]['target'] == 'in-vitro_web_security_vm1inj-redirect-a'
+    assert web[2]['variant_of'] == 'in-vitro_web_security_vm1'
+
+
+def test_a_stale_name_with_the_wrong_flag_is_not_adopted(tmp_path):
+    payloads, games_path, milestones = _tiny_registration(
+        tmp_path, existing_target='in-vitro_web_security_vm1inj_redirect_a',
+        existing_flag='flag{wrong}')
+
+    with pytest.raises(_registrar().RegistrationError, match='not its original'):
+        _registrar().register(payloads, games_path, milestones)
+
+
+def test_a_missing_milestone_source_is_refused(tmp_path):
+    payloads, games_path, milestones = _tiny_registration(tmp_path)
+    (milestones / 'command_milestones' / 'in-vitro' / 'web_security'
+     / 'vm1.txt').unlink()
+    before = games_path.read_bytes()
+
+    with pytest.raises(_registrar().RegistrationError, match='milestone source'):
+        _registrar().register(payloads, games_path, milestones)
+
+    assert games_path.read_bytes() == before
+
+
+def test_an_entry_missing_variant_of_is_backfilled(tmp_path):
+    """An earlier registrar wrote the target and the flag but not variant_of.
+    That link is what ties the variant's flag copy to its original, so a later
+    run fills it in without appending a second entry."""
+    payloads, games_path, milestones = _tiny_registration(
+        tmp_path, existing_target='in-vitro_web_security_vm1inj-redirect-a')
+
+    changed = _registrar().register(payloads, games_path, milestones)
+
+    web = json.loads(games_path.read_text(encoding='utf-8'))[
+        'in-vitro']['web_security']
+    assert len(web) == 3
+    assert web[2]['variant_of'] == 'in-vitro_web_security_vm1'
+    assert any('variant_of' in step for step in changed)
+
+
+def test_a_payload_task_without_a_vm_index_is_refused(tmp_path):
+    payloads, games_path, milestones = _tiny_registration(tmp_path)
+    payloads.write_text(json.dumps({
+        'payloads': [{'id': 'redirect_a', 'task': 'web_security_box'}],
+    }), encoding='utf-8')
+
+    with pytest.raises(_registrar().RegistrationError, match='vm index'):
+        _registrar().register(payloads, games_path, milestones)
+
+
+def test_check_mode_reports_a_missing_registration_without_writing(tmp_path):
+    payloads, games_path, milestones = _tiny_registration(tmp_path)
+    before = games_path.read_bytes()
+
+    changed = _registrar().register(
+        payloads, games_path, milestones, check=True)
+
+    assert changed
+    assert games_path.read_bytes() == before
+    assert not (milestones / 'command_milestones' / 'in-vitro' / 'web_security'
+                / 'vm2.txt').exists()
 
 
 def test_every_registered_target_resolves_to_its_category_compose_file():

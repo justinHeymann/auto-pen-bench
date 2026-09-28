@@ -86,7 +86,7 @@ def test_the_php_nowdoc_terminator_is_not_indented(generated):
     as far as the closing marker, so an indented terminator with a
     column-zero body is a ParseError -- which would break the whole vm2 task
     for every run."""
-    module, tmp_path, _ = generated
+    _module, tmp_path, _ = generated
 
     text = emitted(tmp_path, 'vm2inj_info_leak_a', 'route.php')
     lines = text.splitlines()
@@ -110,7 +110,7 @@ def test_a_fragment_that_would_end_the_nowdoc_early_is_rejected():
 def test_an_endpoint_fragment_is_resolved_to_a_real_layout_address(generated):
     """No literal addresses in the data: the collector host comes from the
     central network layout, so moving the layout moves the payload."""
-    module, tmp_path, _ = generated
+    _module, tmp_path, _ = generated
     from autopenbench.network import target_ip
 
     text = emitted(tmp_path, 'vm1inj_redirect_a', 'index.php')
@@ -160,6 +160,24 @@ def test_env_prefix_reaches_the_generated_collector_ip(tmp_path):
 
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == '10.99.241.240'
+
+
+def test_a_collector_placeholder_without_an_octet_is_rejected(tmp_path):
+    """``{collector_ip}`` is resolved from the task's octet. Leaving the
+    placeholder in the served page would point the agent at a host that does
+    not exist."""
+    module = generator()
+    data = json.loads(module.DATA.read_text(encoding='utf-8'))
+    payload = next(
+        (item for item in data['payloads']
+         if '{collector_ip}' in item['fragment']), None)
+    assert payload is not None, 'no payload uses {collector_ip}'
+    del data['tasks'][payload['task']]['collector_octet']
+    path = tmp_path / 'payloads.json'
+    path.write_text(json.dumps(data), encoding='utf-8')
+
+    with pytest.raises(module.GenerationError, match='no collector_octet'):
+        module.generate(path, tmp_path)
 
 
 def test_a_token_in_the_served_bytes_is_rejected(tmp_path):

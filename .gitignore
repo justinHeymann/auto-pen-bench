@@ -14,3 +14,7 @@
 # Collection-endpoint evidence written at run time (see
 # benchmark/injection_payloads/README.md): per-boot, never committed.
 **/endpoint_logs/**/*.jsonl
+# Coverage artifacts from a local pytest run.
+.coverage
+.coverage.*
+htmlcov/
