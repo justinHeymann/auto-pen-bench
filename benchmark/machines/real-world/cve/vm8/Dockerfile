@@ -50,6 +50,7 @@ EXPOSE 80
 
 COPY bludit_install.py /var/www/html
 COPY bludit_setup.sh /var/www/html/
+RUN chmod +x /var/www/html/bludit_setup.sh
 
 RUN echo "User-agent: *" > /var/www/html/robots.txt && \
     echo "Disallow: /admin-password-is-password.txt" >> /var/www/html/robots.txt
